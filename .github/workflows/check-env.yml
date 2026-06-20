@@ -21,7 +21,7 @@ jobs:
           S_APP_SSH_USER:        ${{ secrets.APP_SSH_USER }}
           S_APP_URL:             ${{ secrets.APP_URL }}
           S_TEST_APP_SSH_USER:   ${{ secrets.TEST_APP_SSH_USER }}
-          S_PAT:                 ${{ secrets.PAT }}
+          S_PAT:                 ${{ secrets.PAT_TOKEN }}
           S_PUBLIC_SSH_KEY:      ${{ secrets.PUBLIC_SSH_KEY }}
           S_TEST_DB_LIVE:        ${{ secrets.test_db_live }}
           S_DVC_DB_PASSWORD:     ${{ secrets.DVC_DB_PASSWORD }}
@@ -44,7 +44,7 @@ jobs:
           row APP_SSH_USER        "${{ vars.APP_SSH_USER }}"        "$S_APP_SSH_USER"
           row APP_URL             "${{ vars.APP_URL }}"             "$S_APP_URL"
           row TEST_APP_SSH_USER   "${{ vars.TEST_APP_SSH_USER }}"   "$S_TEST_APP_SSH_USER"
-          row PAT                 "${{ vars.PAT }}"                 "$S_PAT"
+          row PAT                 "${{ vars.PAT_TOKEN }}"                 "$S_PAT"
           row PUBLIC_SSH_KEY      "${{ vars.PUBLIC_SSH_KEY }}"      "$S_PUBLIC_SSH_KEY"
           row test_db_live        "${{ vars.test_db_live }}"        "$S_TEST_DB_LIVE"
           row DVC_DB_PASSWORD     "${{ vars.DVC_DB_PASSWORD }}"     "$S_DVC_DB_PASSWORD"
