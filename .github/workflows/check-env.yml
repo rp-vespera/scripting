@@ -1,0 +1,57 @@
+name: Check Secrets & Variables
+
+# Diagnostic only — 1 = found (non-empty), 0 = missing/empty.
+# Each name is probed BOTH as a variable (vars.*) and a secret (secrets.*)
+# so you can see which scope actually holds it. Delete this file once verified.
+on:
+  workflow_dispatch:
+  push:
+    branches: [staging]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: staging-script   # same scope production.yml uses
+    steps:
+      - name: Probe
+        env:
+          # every name mapped as a SECRET (masked; presence only)
+          S_APP_HOST:            ${{ secrets.APP_HOST }}
+          S_APP_PORT:            ${{ secrets.APP_PORT }}
+          S_APP_SSH_USER:        ${{ secrets.APP_SSH_USER }}
+          S_APP_URL:             ${{ secrets.APP_URL }}
+          S_TEST_APP_SSH_USER:   ${{ secrets.TEST_APP_SSH_USER }}
+          S_PAT:                 ${{ secrets.PAT }}
+          S_PUBLIC_SSH_KEY:      ${{ secrets.PUBLIC_SSH_KEY }}
+          S_TEST_DB_LIVE:        ${{ secrets.test_db_live }}
+          S_DVC_DB_PASSWORD:     ${{ secrets.DVC_DB_PASSWORD }}
+          S_SAS_DB_HOST:         ${{ secrets.SAS_DB_HOST }}
+          S_SAS_DB_PORT:         ${{ secrets.SAS_DB_PORT }}
+          S_SAS_DB_USERNAME:     ${{ secrets.SAS_DB_USERNAME }}
+          S_SAS_DB_PASSWORD:     ${{ secrets.SAS_DB_PASSWORD }}
+          S_SAS_DB_SAERPRP_NAME: ${{ secrets.SAS_DB_SAERPRP_NAME }}
+          S_SAS_DB_SAERPP4_NAME: ${{ secrets.SAS_DB_SAERPP4_NAME }}
+          S_TAPS_DB_NAME:        ${{ secrets.TAPS_DB_NAME }}
+        run: |
+          # 1 = found (non-empty), 0 = not found / empty
+          probe () { if [ -n "$2" ]; then echo "$1 = 1"; else echo "$1 = 0"; fi; }
+
+          echo "name                      var secret"
+          row () { v=0; s=0; [ -n "$2" ] && v=1; [ -n "$3" ] && s=1; printf '%-24s  %s    %s\n' "$1" "$v" "$s"; }
+
+          row APP_HOST            "${{ vars.APP_HOST }}"            "$S_APP_HOST"
+          row APP_PORT            "${{ vars.APP_PORT }}"            "$S_APP_PORT"
+          row APP_SSH_USER        "${{ vars.APP_SSH_USER }}"        "$S_APP_SSH_USER"
+          row APP_URL             "${{ vars.APP_URL }}"             "$S_APP_URL"
+          row TEST_APP_SSH_USER   "${{ vars.TEST_APP_SSH_USER }}"   "$S_TEST_APP_SSH_USER"
+          row PAT                 "${{ vars.PAT }}"                 "$S_PAT"
+          row PUBLIC_SSH_KEY      "${{ vars.PUBLIC_SSH_KEY }}"      "$S_PUBLIC_SSH_KEY"
+          row test_db_live        "${{ vars.test_db_live }}"        "$S_TEST_DB_LIVE"
+          row DVC_DB_PASSWORD     "${{ vars.DVC_DB_PASSWORD }}"     "$S_DVC_DB_PASSWORD"
+          row SAS_DB_HOST         "${{ vars.SAS_DB_HOST }}"         "$S_SAS_DB_HOST"
+          row SAS_DB_PORT         "${{ vars.SAS_DB_PORT }}"         "$S_SAS_DB_PORT"
+          row SAS_DB_USERNAME     "${{ vars.SAS_DB_USERNAME }}"     "$S_SAS_DB_USERNAME"
+          row SAS_DB_PASSWORD     "${{ vars.SAS_DB_PASSWORD }}"     "$S_SAS_DB_PASSWORD"
+          row SAS_DB_SAERPRP_NAME "${{ vars.SAS_DB_SAERPRP_NAME }}" "$S_SAS_DB_SAERPRP_NAME"
+          row SAS_DB_SAERPP4_NAME "${{ vars.SAS_DB_SAERPP4_NAME }}" "$S_SAS_DB_SAERPP4_NAME"
+          row TAPS_DB_NAME        "${{ vars.TAPS_DB_NAME }}"        "$S_TAPS_DB_NAME"
