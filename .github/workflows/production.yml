@@ -22,7 +22,7 @@ jobs:
         with:
           host: ${{ secrets.APP_HOST }}
           username: ${{ secrets.APP_SSH_USER }}
-          key: ${{ secrets.PUBLIC_SSH_KEY }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
           script: |
             set -e
             echo "Starting PRODUCTION deployment..."
