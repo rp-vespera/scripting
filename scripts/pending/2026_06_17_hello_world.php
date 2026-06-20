@@ -15,12 +15,7 @@ use Illuminate\Support\Facades\DB;
  */
 
 return function ($cmd) {
-    $row = DB::connection('mysql_secondary')
-        ->selectOne("
-            SELECT *
-            FROM bpar_i_person
-            WHERE bpar_i_person_id = 1
-        ");
-
-    print_r($row);
+    $row = DB::selectOne("SELECT 'hello world' AS message");
+    echo $row->message . "\n";
+    $cmd->info($row->message);
 };
