@@ -1,0 +1,253 @@
+name: Staging CI/CD
+
+# CI (lint + test) gates the deploy; the deploy step syncs code and caches only.
+on:
+  push:
+    branches: [staging]
+  pull_request:
+  
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------
+  # CD: deploy to staging (not on PRs)
+  # ----------------------------------------------------------------------
+  deploy:
+    name: Deploy to OVH Staging
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: staging-script
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to OVH Staging
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.APP_SSH_USER }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
+          script: |
+            set -e
+            echo "Starting STAGING deployment..."
+
+            APP_PATH="/var/www/staging-script"
+
+            # ==========================
+            # FIRST-TIME CLONE
+            # ==========================
+            if [ ! -d "$APP_PATH/.git" ]; then
+              rm -rf $APP_PATH
+              git clone -b staging https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git $APP_PATH
+            fi
+
+            cd $APP_PATH
+
+            git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
+
+            # ==========================
+            # SAFE GIT SYNC
+            # ==========================
+            echo "Syncing staging branch safely..."
+
+            mv .env .env.backup 2>/dev/null || true
+            git fetch origin staging
+            git checkout staging 2>/dev/null || git checkout -b staging origin/staging
+            # Fast-forward only: never diverges (deploy doesn't push), and keeps
+            # the dashboard's local file moves intact (unlike reset --hard).
+            git merge --ff-only origin/staging
+            mv .env.backup .env 2>/dev/null || true
+
+            git clean -fd -e .env -e storage -e bootstrap/cache -e scripts/done -e scripts/failed
+
+            # ==========================
+            # INSTALL DEPENDENCIES
+            # ==========================
+            echo "Installing dependencies..."
+            composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+            # ==========================
+            # ENV SETUP (app config only)
+            # ==========================
+            echo "Preparing environment..."
+
+            if [ ! -f .env ]; then
+              touch .env
+            fi
+
+            export APP_URL="${{ secrets.APP_URL }}"
+
+            # ==========================
+            # DATABASE EXPORTS
+            # ==========================
+
+            # DB1 — primary (DVC)
+            export DB_HOST="${{ secrets.APP_HOST }}"
+            export DB_PORT="${{ secrets.APP_PORT }}"
+            export DB_DATABASE="${{ secrets.DVC_DB_NAME }}"
+            export DB_USERNAME="${{ secrets.DVC_DB_USERNAME }}"
+            export DB_PASSWORD="${{ secrets.DVC_DB_PASSWORD }}"
+
+            # DB2 — secondary (SAS SAERPRP)
+            export DB2_HOST="${{ secrets.SAS_DB_HOST }}"
+            export DB2_PORT="${{ secrets.SAS_DB_PORT }}"
+            export DB2_DATABASE="${{ secrets.SAS_DB_SAERPRP_NAME }}"
+            export DB2_USERNAME="${{ secrets.SAS_DB_USERNAME }}"
+            export DB2_PASSWORD="${{ secrets.SAS_DB_PASSWORD }}"
+
+            # DB3 — tertiary (SAS SAERPP4)
+            export DB3_HOST="${{ secrets.SAS_DB_HOST }}"
+            export DB3_PORT="${{ secrets.SAS_DB_PORT }}"
+            export DB3_DATABASE="${{ secrets.SAS_DB_SAERPP4_NAME }}"
+            export DB3_USERNAME="${{ secrets.SAS_DB_USERNAME }}"
+            export DB3_PASSWORD="${{ secrets.SAS_DB_PASSWORD }}"
+
+            # DB4 — quaternary (TAPS)
+            export DB4_HOST="${{ secrets.TAPS_DB_HOST }}"
+            export DB4_PORT="${{ secrets.TAPS_DB_PORT }}"
+            export DB4_DATABASE="${{ secrets.TAPS_DB_NAME }}"
+            export DB4_USERNAME="${{ secrets.TAPS_DB_USERNAME }}"
+            export DB4_PASSWORD="${{ secrets.TAPS_DB_PASSWORD }}"
+
+            echo "Writing database config..."
+
+            # Primary DB
+            grep -q "^DB_CONNECTION=" .env \
+              && sed -i "s|^DB_CONNECTION=.*|DB_CONNECTION=mysql|" .env \
+              || echo "DB_CONNECTION=mysql" >> .env
+
+            grep -q "^DB_HOST=" .env \
+              && sed -i "s|^DB_HOST=.*|DB_HOST=${DB_HOST}|" .env \
+              || echo "DB_HOST=${DB_HOST}" >> .env
+
+            grep -q "^DB_PORT=" .env \
+              && sed -i "s|^DB_PORT=.*|DB_PORT=${DB_PORT}|" .env \
+              || echo "DB_PORT=${DB_PORT}" >> .env
+
+            grep -q "^DB_DATABASE=" .env \
+              && sed -i "s|^DB_DATABASE=.*|DB_DATABASE=${DB_DATABASE}|" .env \
+              || echo "DB_DATABASE=${DB_DATABASE}" >> .env
+
+            grep -q "^DB_USERNAME=" .env \
+              && sed -i "s|^DB_USERNAME=.*|DB_USERNAME=${DB_USERNAME}|" .env \
+              || echo "DB_USERNAME=${DB_USERNAME}" >> .env
+
+            grep -q "^DB_PASSWORD=" .env \
+              && sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=\"${DB_PASSWORD}\"|" .env \
+              || echo "DB_PASSWORD=\"${DB_PASSWORD}\"" >> .env
+
+            # Secondary DB
+            grep -q "^DB2_HOST=" .env \
+              && sed -i "s|^DB2_HOST=.*|DB2_HOST=${DB2_HOST}|" .env \
+              || echo "DB2_HOST=${DB2_HOST}" >> .env
+
+            grep -q "^DB2_PORT=" .env \
+              && sed -i "s|^DB2_PORT=.*|DB2_PORT=${DB2_PORT}|" .env \
+              || echo "DB2_PORT=${DB2_PORT}" >> .env
+
+            grep -q "^DB2_DATABASE=" .env \
+              && sed -i "s|^DB2_DATABASE=.*|DB2_DATABASE=${DB2_DATABASE}|" .env \
+              || echo "DB2_DATABASE=${DB2_DATABASE}" >> .env
+
+            grep -q "^DB2_USERNAME=" .env \
+              && sed -i "s|^DB2_USERNAME=.*|DB2_USERNAME=${DB2_USERNAME}|" .env \
+              || echo "DB2_USERNAME=${DB2_USERNAME}" >> .env
+
+            grep -q "^DB2_PASSWORD=" .env \
+              && sed -i "s|^DB2_PASSWORD=.*|DB2_PASSWORD=\"${DB2_PASSWORD}\"|" .env \
+              || echo "DB2_PASSWORD=\"${DB2_PASSWORD}\"" >> .env
+
+            # Tertiary DB
+            grep -q "^DB3_HOST=" .env \
+              && sed -i "s|^DB3_HOST=.*|DB3_HOST=${DB3_HOST}|" .env \
+              || echo "DB3_HOST=${DB3_HOST}" >> .env
+
+            grep -q "^DB3_PORT=" .env \
+              && sed -i "s|^DB3_PORT=.*|DB3_PORT=${DB3_PORT}|" .env \
+              || echo "DB3_PORT=${DB3_PORT}" >> .env
+
+            grep -q "^DB3_DATABASE=" .env \
+              && sed -i "s|^DB3_DATABASE=.*|DB3_DATABASE=${DB3_DATABASE}|" .env \
+              || echo "DB3_DATABASE=${DB3_DATABASE}" >> .env
+
+            grep -q "^DB3_USERNAME=" .env \
+              && sed -i "s|^DB3_USERNAME=.*|DB3_USERNAME=${DB3_USERNAME}|" .env \
+              || echo "DB3_USERNAME=${DB3_USERNAME}" >> .env
+
+            grep -q "^DB3_PASSWORD=" .env \
+              && sed -i "s|^DB3_PASSWORD=.*|DB3_PASSWORD=\"${DB3_PASSWORD}\"|" .env \
+              || echo "DB3_PASSWORD=\"${DB3_PASSWORD}\"" >> .env
+
+            # Quaternary DB
+            grep -q "^DB4_HOST=" .env \
+              && sed -i "s|^DB4_HOST=.*|DB4_HOST=${DB4_HOST}|" .env \
+              || echo "DB4_HOST=${DB4_HOST}" >> .env
+
+            grep -q "^DB4_PORT=" .env \
+              && sed -i "s|^DB4_PORT=.*|DB4_PORT=${DB4_PORT}|" .env \
+              || echo "DB4_PORT=${DB4_PORT}" >> .env
+
+            grep -q "^DB4_DATABASE=" .env \
+              && sed -i "s|^DB4_DATABASE=.*|DB4_DATABASE=${DB4_DATABASE}|" .env \
+              || echo "DB4_DATABASE=${DB4_DATABASE}" >> .env
+
+            grep -q "^DB4_USERNAME=" .env \
+              && sed -i "s|^DB4_USERNAME=.*|DB4_USERNAME=${DB4_USERNAME}|" .env \
+              || echo "DB4_USERNAME=${DB4_USERNAME}" >> .env
+
+            grep -q "^DB4_PASSWORD=" .env \
+              && sed -i "s|^DB4_PASSWORD=.*|DB4_PASSWORD=\"${DB4_PASSWORD}\"|" .env \
+              || echo "DB4_PASSWORD=\"${DB4_PASSWORD}\"" >> .env
+              
+            # ==========================
+            # APP KEY
+            # ==========================
+            echo "Ensuring APP_KEY exists..."
+            # key:generate only REPLACES an existing APP_KEY= line; on a fresh
+            # .env there is nothing to replace and it silently writes nothing.
+            # Seed an empty placeholder first so the key is actually persisted.
+            grep -q "^APP_KEY=" .env || echo "APP_KEY=" >> .env
+            if ! grep -q "^APP_KEY=base64:" .env; then
+              php artisan key:generate --force
+            fi
+
+            # ==========================
+            # CACHE FIX (IMPORTANT)
+            # ==========================
+            echo "Refreshing Laravel config..."
+
+            php artisan config:clear
+            php artisan cache:clear
+            php artisan config:cache
+
+            # ==========================
+            # DATABASE MIGRATIONS
+            # ==========================
+            echo "Running migrations..."
+            php artisan migrate --force
+
+            # ==========================
+            # SCRIPT REVIEW PERMISSIONS
+            # ==========================
+            # Scripts are NOT executed by the deploy. They are run and filed
+            # (done/ or failed/) when approved in the /scripts dashboard.
+            # Make the script folders writable so the web user can move files
+            # on approval.
+            echo "Preparing script folders for the review dashboard..."
+            chmod -R 0777 scripts/pending scripts/done scripts/failed 2>/dev/null || true
+
+            # ==========================
+            # FINAL STEPS
+            # ==========================
+            php artisan route:cache
+            php artisan view:cache
+
+            echo "STAGING deployment finished successfully!"
