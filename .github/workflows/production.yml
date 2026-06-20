@@ -20,8 +20,8 @@ jobs:
       - name: Deploy to OVH Production
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.APP_HOST }}
-          username: ${{ vars.APP_SSH_USER }}
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.APP_SSH_USER }}
           key: ${{ secrets.PUBLIC_SSH_KEY }}
           script: |
             set -e
@@ -34,12 +34,12 @@ jobs:
             # ==========================
             if [ ! -d "$APP_PATH/.git" ]; then
               rm -rf $APP_PATH
-              git clone https://${{ secrets.PAT }}@github.com/rp-vespera/scripting.git $APP_PATH
+              git clone https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/scripting-replica.git $APP_PATH
             fi
 
             cd $APP_PATH
 
-            git remote set-url origin https://${{ secrets.PAT }}@github.com/rp-vespera/scripting.git || true
+            git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/scripting-replica.git || true
 
             # ==========================
             # SAFE GIT SYNC
@@ -74,32 +74,33 @@ jobs:
             # ==========================
 
             # DB1 — primary (DVC)
-            export DB_HOST="${{ vars.APP_HOST }}"
-            export DB_PORT="${{ vars.APP_PORT }}"
-            export DB_DATABASE="${{ secrets.test_db_live }}"
-            export DB_USERNAME="${{ vars.TEST_APP_SSH_USER }}"
+            export DB_HOST="${{ secrets.APP_HOST }}"
+            export DB_PORT="${{ secrets.APP_PORT }}"
+            export DB_DATABASE="${{ secrets.DVC_DB_NAME }}"
+            export DB_USERNAME="${{ secrets.DVC_DB_USERNAME }}"
             export DB_PASSWORD="${{ secrets.DVC_DB_PASSWORD }}"
 
             # DB2 — secondary (SAS SAERPRP)
-            export DB2_HOST="${{ vars.SAS_DB_HOST }}"
-            export DB2_PORT="${{ vars.SAS_DB_PORT }}"
-            export DB2_DATABASE="${{ vars.SAS_DB_SAERPRP_NAME }}"
-            export DB2_USERNAME="${{ vars.SAS_DB_USERNAME }}"
-            export DB2_PASSWORD="${{ vars.SAS_DB_PASSWORD }}"
+            export DB2_HOST="${{ secrets.SAS_DB_HOST }}"
+            export DB2_PORT="${{ secrets.SAS_DB_PORT }}"
+            export DB2_DATABASE="${{ secrets.SAS_DB_SAERPRP_NAME }}"
+            export DB2_USERNAME="${{ secrets.SAS_DB_USERNAME }}"
+            export DB2_PASSWORD="${{ secrets.SAS_DB_PASSWORD }}"
 
             # DB3 — tertiary (SAS SAERPP4)
             export DB3_HOST="${{ secrets.SAS_DB_HOST }}"
             export DB3_PORT="${{ secrets.SAS_DB_PORT }}"
-            export DB3_DATABASE="${{ vars.SAS_DB_SAERPP4_NAME }}"
+            export DB3_DATABASE="${{ secrets.SAS_DB_SAERPP4_NAME }}"
             export DB3_USERNAME="${{ secrets.SAS_DB_USERNAME }}"
             export DB3_PASSWORD="${{ secrets.SAS_DB_PASSWORD }}"
 
-            # DB4 — quaternary (TAPS ckgoc replica)
-            export DB4_HOST="${{ secrets.SAS_DB_HOST }}"
-            export DB4_PORT="${{ secrets.SAS_DB_PORT }}"
-            export DB4_DATABASE="${{ vars.TAPS_DB_NAME }}"
-            export DB4_USERNAME="${{ secrets.SAS_DB_USERNAME }}"
-            export DB4_PASSWORD="${{ secrets.SAS_DB_PASSWORD }}"
+            # DB4 — quaternary (TAPS)
+            export DB4_HOST="${{ secrets.TAPS_DB_HOST }}"
+            export DB4_PORT="${{ secrets.TAPS_DB_PORT }}"
+            export DB4_DATABASE="${{ secrets.TAPS_DB_NAME }}"
+            export DB4_USERNAME="${{ secrets.TAPS_DB_USERNAME }}"
+            export DB4_PASSWORD="${{ secrets.TAPS_DB_PASSWORD }}"
+
 
             grep -q "^APP_ENV=" .env \
               && sed -i "s|^APP_ENV=.*|APP_ENV=production|" .env \
