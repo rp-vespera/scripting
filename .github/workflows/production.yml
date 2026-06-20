@@ -47,13 +47,7 @@ jobs:
             echo "Syncing main branch safely..."
 
             mv .env .env.backup 2>/dev/null || true
-            git fetch origin main
-            git checkout main 2>/dev/null || git checkout -b main origin/main
-            # Fast-forward when possible; if main was force-pushed / rebased
-            # (divergent or unrelated history), `git pull` would abort needing a
-            # reconcile strategy. Fall back to a hard reset onto the remote,
-            # which is the source of truth for this deploy target.
-            git merge --ff-only origin/main || git reset --hard origin/main
+            git pull origin main
             mv .env.backup .env 2>/dev/null || true
 
             git clean -fd -e .env -e storage -e bootstrap/cache -e scripts/done -e scripts/failed
