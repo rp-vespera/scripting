@@ -39,7 +39,7 @@ jobs:
             set -e
             echo "Starting STAGING deployment..."
 
-            APP_PATH="/var/www/staging-script-replica"
+            APP_PATH="/var/www/staging-script"
 
             # ==========================
             # FIRST-TIME CLONE
