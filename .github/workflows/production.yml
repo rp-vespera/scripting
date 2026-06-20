@@ -210,6 +210,9 @@ jobs:
             # APP KEY
             # ==========================
             echo "Ensuring APP_KEY exists..."
+            # key:generate only REPLACES an existing APP_KEY= line; seed an empty
+            # placeholder first so the key is actually persisted on a fresh .env.
+            grep -q "^APP_KEY=" .env || echo "APP_KEY=" >> .env
             if ! grep -q "^APP_KEY=base64:" .env; then
               php artisan key:generate --force
             fi
