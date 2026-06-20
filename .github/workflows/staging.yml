@@ -24,7 +24,7 @@ jobs:
     name: Deploy to OVH Staging
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    environment: staging-script.
+    environment: staging-script
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
 
             cd $APP_PATH
 
-            git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
+            git remote set-url origin https://${{ secrets.PAT }}@github.com/rp-vespera/script-replica.git || true
 
             # ==========================
             # SAFE GIT SYNC
