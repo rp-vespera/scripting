@@ -61,9 +61,12 @@ jobs:
             mv .env .env.backup 2>/dev/null || true
             git fetch origin staging
             git checkout staging 2>/dev/null || git checkout -b staging origin/staging
-            # Fast-forward only: never diverges (deploy doesn't push), and keeps
-            # the dashboard's local file moves intact (unlike reset --hard).
-            git merge --ff-only origin/staging
+            # Normally fast-forward only — keeps the dashboard's local file moves
+            # intact and never diverges (deploy doesn't push). But if staging was
+            # force-pushed / rebased (diverged or unrelated history), --ff-only
+            # fails; fall back to a hard reset onto the remote, which is always
+            # the source of truth for this deploy target.
+            git merge --ff-only origin/staging || git reset --hard origin/staging
             mv .env.backup .env 2>/dev/null || true
 
             git clean -fd -e .env -e storage -e bootstrap/cache -e scripts/done -e scripts/failed
@@ -211,6 +214,10 @@ jobs:
             # APP KEY
             # ==========================
             echo "Ensuring APP_KEY exists..."
+            # key:generate only REPLACES an existing APP_KEY= line; on a fresh
+            # .env there is nothing to replace and it silently writes nothing.
+            # Seed an empty placeholder first so the key is actually persisted.
+            grep -q "^APP_KEY=" .env || echo "APP_KEY=" >> .env
             if ! grep -q "^APP_KEY=base64:" .env; then
               php artisan key:generate --force
             fi
