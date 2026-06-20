@@ -61,12 +61,9 @@ jobs:
             mv .env .env.backup 2>/dev/null || true
             git fetch origin staging
             git checkout staging 2>/dev/null || git checkout -b staging origin/staging
-            # Normally fast-forward only — keeps the dashboard's local file moves
-            # intact and never diverges (deploy doesn't push). But if staging was
-            # force-pushed / rebased (diverged or unrelated history), --ff-only
-            # fails; fall back to a hard reset onto the remote, which is always
-            # the source of truth for this deploy target.
-            git merge --ff-only origin/staging || git reset --hard origin/staging
+            # Fast-forward only: never diverges (deploy doesn't push), and keeps
+            # the dashboard's local file moves intact (unlike reset --hard).
+            git merge --ff-only origin/staging
             mv .env.backup .env 2>/dev/null || true
 
             git clean -fd -e .env -e storage -e bootstrap/cache -e scripts/done -e scripts/failed
@@ -93,8 +90,8 @@ jobs:
             # ==========================
 
             # DB1 — primary (DVC)
-            export DB_HOST="${{ secrets.DVC_DB_HOST }}"
-            export DB_PORT="${{ secrets.DVC_DB_PORT }}"
+            export DB_HOST="${{ secrets.APP_HOST }}"
+            export DB_PORT="${{ secrets.APP_PORT }}"
             export DB_DATABASE="${{ secrets.DVC_DB_NAME }}"
             export DB_USERNAME="${{ secrets.DVC_DB_USERNAME }}"
             export DB_PASSWORD="${{ secrets.DVC_DB_PASSWORD }}"
