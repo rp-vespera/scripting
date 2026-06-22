@@ -23,5 +23,5 @@ return function ($cmd) {
         ");
 
     print_r($row);
-    
+     
 };
