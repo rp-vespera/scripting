@@ -21,8 +21,8 @@ return function ($cmd) {
             FROM bpar_i_person
             WHERE bpar_i_person_id = 1
         ");
-
+ 
     print_r($row);
      
-    
+
 };

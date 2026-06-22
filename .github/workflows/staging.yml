@@ -61,13 +61,9 @@ jobs:
             mv .env .env.backup 2>/dev/null || true
             git fetch origin staging
             git checkout staging 2>/dev/null || git checkout -b staging origin/staging
-            # Hard reset to the remote tip. Unlike --ff-only this works even when
-            # the local checkout has UNRELATED history (e.g. the server was
-            # previously cloned from a different repo, script-replica), and it
-            # discards any tracked-file edits the /scripts dashboard made at
-            # runtime so the sync never blocks. Git is the source of truth for
-            # tracked files; untracked runtime files survive via the clean excludes.
-            git reset --hard origin/staging
+            # Fast-forward only: never diverges (deploy doesn't push), and keeps
+            # the dashboard's local file moves intact (unlike reset --hard).
+            git merge --ff-only origin/staging
             mv .env.backup .env 2>/dev/null || true
 
             git clean -fd -e .env -e storage -e bootstrap/cache -e scripts/done -e scripts/failed
