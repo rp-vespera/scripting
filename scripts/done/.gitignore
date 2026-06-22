@@ -1,0 +1,6 @@
+# Scripts are moved here at runtime when approved in the /scripts dashboard.
+# Keep the folder, but never track/push the script files themselves — they are
+# a per-server runtime artifact, not repo source.
+*
+!.gitignore
+!.gitkeep
