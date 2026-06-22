@@ -46,12 +46,12 @@ jobs:
             # ==========================
             if [ ! -d "$APP_PATH/.git" ]; then
               rm -rf $APP_PATH
-              git clone -b staging https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/scripting-replica.git $APP_PATH
+              git clone -b staging https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git $APP_PATH
             fi
 
             cd $APP_PATH
 
-            git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/scripting-replica.git || true
+            git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
 
             # ==========================
             # SAFE GIT SYNC
