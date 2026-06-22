@@ -206,3 +206,22 @@ jobs:
             php artisan view:cache
 
             echo "STAGING deployment finished successfully!"
+
+      # TEMP DIAGNOSTIC — remove once the /scripts/review/approve 500 is solved.
+      # Prints the Laravel log + script_runs schema into THIS Actions run output,
+      # so you can read the 500's stack trace without SSH/OVH access.
+      - name: Show Laravel log & DB schema (debug)
+        if: always()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.APP_SSH_USER }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
+          script: |
+            cd /var/www/staging-script
+            echo "===== migration status ====="
+            php artisan migrate:status 2>&1 | tail -n 20 || echo "(migrate:status failed)"
+            echo "===== script_runs columns ====="
+            php artisan tinker --execute="echo implode(', ', Schema::getColumnListing('script_runs'));" 2>&1 || echo "(could not read script_runs schema — table may not exist)"
+            echo "===== storage/logs/laravel.log (last 150 lines) ====="
+            tail -n 150 storage/logs/laravel.log 2>/dev/null || echo "(no laravel.log)"
