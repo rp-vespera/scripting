@@ -24,7 +24,7 @@ jobs:
     name: Deploy to OVH Staging
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    environment: staging
+    environment: staging-script
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
