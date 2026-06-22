@@ -61,13 +61,8 @@ jobs:
             mv .env .env.backup 2>/dev/null || true
             git fetch origin staging
             git checkout staging 2>/dev/null || git checkout -b staging origin/staging
-            # The /scripts dashboard mutates tracked files under scripts/ at
-            # runtime, which makes the working tree dirty and blocks the merge
-            # ("local changes would be overwritten"). Discard those local edits
-            # so the fast-forward applies cleanly; git is the source of truth for
-            # tracked files, and untracked runtime files are preserved below.
-            git checkout -- scripts/ 2>/dev/null || true
-            # Fast-forward only: never diverges (deploy doesn't push).
+            # Fast-forward only: never diverges (deploy doesn't push), and keeps
+            # the dashboard's local file moves intact (unlike reset --hard).
             git merge --ff-only origin/staging
             mv .env.backup .env 2>/dev/null || true
 
