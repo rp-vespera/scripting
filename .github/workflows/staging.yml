@@ -51,6 +51,10 @@ jobs:
 
             cd $APP_PATH
 
+            # Trust this path even if .git is owned by a different user (e.g. the
+            # web user touched files at runtime) — avoids git "dubious ownership".
+            git config --global --add safe.directory "$APP_PATH"
+
             git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
 
             # ==========================
