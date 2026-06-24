@@ -219,6 +219,7 @@ jobs:
             php artisan view:cache
 
             echo "STAGING deployment finished successfully!"
+            
 
       # TEMP DIAGNOSTIC — remove once the /scripts/review/approve 500 is solved.
       # Prints the Laravel log + script_runs schema into THIS Actions run output,
