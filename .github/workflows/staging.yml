@@ -190,14 +190,23 @@ jobs:
             php artisan migrate --force
 
             # ==========================
-            # SCRIPT REVIEW PERMISSIONS
+            # SCRIPT FOLDER PERMISSIONS
             # ==========================
-            # Scripts are NOT executed by the deploy. They are run and filed
-            # (done/ or failed/) when approved in the /scripts dashboard.
-            # Make the script folders writable so the web user can move files
-            # on approval.
-            echo "Preparing script folders for the review dashboard..."
+            # Make the script folders writable so both the deploy and the web
+            # user (the /scripts dashboard) can move files between pending/,
+            # done/ and failed/.
+            echo "Preparing script folders..."
             chmod -R 0777 scripts/pending scripts/done scripts/failed 2>/dev/null || true
+
+            # ==========================
+            # RUN PENDING ONE-OFF SCRIPTS
+            # ==========================
+            # Execute everything in scripts/pending/, file each to done/ (success)
+            # or failed/ (failure), and record the outcome in script_runs.
+            # Idempotent: a script that already succeeded is filed without
+            # re-running, and a single failing script does not abort the deploy.
+            echo "Running pending one-off scripts..."
+            php artisan scripts:run-pending
 
             # ==========================
             # FINAL STEPS
