@@ -185,10 +185,14 @@ return function ($cmd) {
     echo "\n$line\n";
     if (!$DRY_RUN) {
         echo "Total rows updated : {$totalRows}\n";
-        $cmd->info("lmc-payout-payee-correction: {$totalRows} row(s) updated across all documents.");
+        if (isset($cmd)) {
+            $cmd->info("lmc-payout-payee-correction: {$totalRows} row(s) updated across all documents.");
+        }
     } else {
         echo "DRY-RUN complete — no changes written.\n";
-        $cmd->info('lmc-payout-payee-correction: dry-run complete, no changes written.');
+        if (isset($cmd)) {
+            $cmd->info('lmc-payout-payee-correction: dry-run complete, no changes written.');
+        }
     }
     echo "$line\n";
 };
