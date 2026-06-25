@@ -44,20 +44,25 @@ class RunPendingScripts extends Command
             $name = basename($path);
             $from = 'scripts/pending/'.$name;
 
-            // Already ran successfully before? File to done/ without re-running.
-            $alreadyDone = ScriptRun::where('filename', $name)
-                ->where('status', 'success')
-                ->latest('id')
-                ->first();
+            // Already processed before (success OR failure)? Do NOT re-run.
+            // File it to its outcome folder and move on. For a prior failure we
+            // echo the stored error so you can see why it failed — without
+            // re-executing it. To retry a failed script, delete its script_runs
+            // row (or rename the file) so it counts as new.
+            $prior = ScriptRun::where('filename', $name)->latest('id')->first();
 
-            if ($alreadyDone) {
-                $this->moveFile($from, 'done', $name);
-                $alreadyDone->update([
-                    'approval_status' => 'approved',
-                    'moved_to' => 'done',
-                    'approved_at' => now(),
-                ]);
-                $this->line("• {$name}: already succeeded — filed to scripts/done/ (not re-run)");
+            if ($prior) {
+                $target = $prior->succeeded() ? 'done' : 'failed';
+                $this->moveFile($from, $target, $name);
+
+                if ($prior->succeeded()) {
+                    $this->line("• {$name}: already succeeded — filed to scripts/done/ (not re-run)");
+                } else {
+                    $this->error("• {$name}: previously FAILED — left in scripts/failed/, NOT re-run.");
+                    if ($prior->error) {
+                        $this->line('    last error: '.substr($prior->error, 0, 500));
+                    }
+                }
                 $skipped++;
 
                 continue;
