@@ -51,6 +51,10 @@ jobs:
 
             cd $APP_PATH
 
+            # Trust this path even if .git is owned by a different user (e.g. the
+            # web user touched files at runtime) — avoids git "dubious ownership".
+            git config --global --add safe.directory "$APP_PATH"
+
             git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
 
             # ==========================
@@ -190,14 +194,23 @@ jobs:
             php artisan migrate --force
 
             # ==========================
-            # SCRIPT REVIEW PERMISSIONS
+            # SCRIPT FOLDER PERMISSIONS
             # ==========================
-            # Scripts are NOT executed by the deploy. They are run and filed
-            # (done/ or failed/) when approved in the /scripts dashboard.
-            # Make the script folders writable so the web user can move files
-            # on approval.
-            echo "Preparing script folders for the review dashboard..."
+            # Make the script folders writable so both the deploy and the web
+            # user (the /scripts dashboard) can move files between pending/,
+            # done/ and failed/.
+            echo "Preparing script folders..."
             chmod -R 0777 scripts/pending scripts/done scripts/failed 2>/dev/null || true
+
+            # ==========================
+            # RUN PENDING ONE-OFF SCRIPTS
+            # ==========================
+            # Execute everything in scripts/pending/, file each to done/ (success)
+            # or failed/ (failure), and record the outcome in script_runs.
+            # Idempotent: a script that already succeeded is filed without
+            # re-running, and a single failing script does not abort the deploy.
+            echo "Running pending one-off scripts..."
+            php artisan scripts:run-pending
 
             # ==========================
             # FINAL STEPS
@@ -206,6 +219,7 @@ jobs:
             php artisan view:cache
 
             echo "STAGING deployment finished successfully!"
+            
 
       # TEMP DIAGNOSTIC — remove once the /scripts/review/approve 500 is solved.
       # Prints the Laravel log + script_runs schema into THIS Actions run output,

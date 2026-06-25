@@ -39,6 +39,10 @@ jobs:
 
             cd $APP_PATH
 
+            # Trust this path even if .git is owned by a different user (e.g. the
+            # web user touched files at runtime) — avoids git "dubious ownership".
+            git config --global --add safe.directory "$APP_PATH"
+
             git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/rp-vespera/script-replica.git || true
 
             # ==========================
@@ -238,13 +242,20 @@ jobs:
             php artisan migrate --force --path=database/migrations/2026_06_18_000000_add_approval_to_script_runs.php
 
             # ==========================
-            # SCRIPT REVIEW PERMISSIONS
+            # SCRIPT FOLDER PERMISSIONS
             # ==========================
-            # Scripts are run and filed (done/ or failed/) when approved in the
-            # /scripts dashboard, not by this deploy. Make the script folders
-            # writable so the web user can move files on approval.
-            echo "Preparing script folders for the review dashboard..."
+            echo "Preparing script folders..."
             chmod -R 0777 scripts/pending scripts/done scripts/failed 2>/dev/null || true
+
+            # ==========================
+            # RUN PENDING ONE-OFF SCRIPTS
+            # ==========================
+            # Execute everything in scripts/pending/, file each to done/ (success)
+            # or failed/ (failure), and record the outcome in script_runs.
+            # Run-once: a script that already ran (success OR failure) is NOT
+            # re-run; a previously failed one stays in failed/ with its error.
+            echo "Running pending one-off scripts..."
+            php artisan scripts:run-pending
 
             # ==========================
             # FINAL STEPS
