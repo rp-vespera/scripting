@@ -192,7 +192,7 @@ return function ($cmd) {
         echo "DRY-RUN complete — no changes written.\n";
         if (isset($cmd)) {
             $cmd->info('lmc-payout-payee-correction: dry-run complete, no changes written.');
-        }
+           }
     }
     echo "$line\n";
 };
