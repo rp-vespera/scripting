@@ -6,6 +6,14 @@
 // (UPDATE values to 0, mark docstatus='VO', is_active=0). Same variance close,
 // audit trail preserved, fully reversible. See feedback_soft_delete_default rule.
 //
+// UPDATED 2026-06-29: every UPDATE now stamps audit columns
+//   updated      = 'SCRIPT-WEB'   (no IMS reference for WIP35755 — would be
+//                                   'IMS-<num>-SCRIPT-WEB' otherwise)
+//   date_updated = NOW()          (reflects when the script ran, not the
+//                                   original document's date)
+// Per user instruction 2026-06-29 — makes script-touched rows distinguishable
+// in IMS / audit reviews.
+//
 // Defect: 3 WPCL closures posted for the same project on different dates, all by the
 // same MKR (bp 23078) and same CKR (bp 1355), each for the same ₱125,662.31.
 // Only the first (WPCL-ACPR0969 on 2026-01-10) is legitimate; the 2nd (WPCL-ACPR0974
@@ -72,6 +80,9 @@ return function ($cmd) {
     $say   = function ($s) { echo $s . PHP_EOL; };
     $money = fn (float $x) => number_format($x, 2, '.', ',');
 
+    // Audit marker for every UPDATE — see header docblock 2026-06-29.
+    $UPD_TAG = 'SCRIPT-WEB';   // (no IMS for WIP35755; otherwise 'IMS-<num>-SCRIPT-WEB')
+
     $say($line);
     $say(" PROJECT 11229 (RP AREA 5&6-24\" U CULVERT) — soft-delete 2 duplicate closures");
     $say(" Boss-approved. Pattern: same MKR/CKR/amount drafted on 3 different dates, only first is legit.");
@@ -130,53 +141,68 @@ return function ($cmd) {
 
             // 1. Signees: mark inactive
             $a = $db->update(
-                "UPDATE wip_t_project_closure_signee SET is_active = 0
-                 WHERE wip_t_project_closure_signee_id IN (" . implode(',', $d['signee_ids']) . ")"
+                "UPDATE wip_t_project_closure_signee
+                    SET is_active = 0, updated = ?, date_updated = NOW()
+                  WHERE wip_t_project_closure_signee_id IN (" . implode(',', $d['signee_ids']) . ")",
+                [$UPD_TAG]
             );
             $say("    UPDATE signees(2) is_active=0: affected=$a");
 
             // 2. Acctpair: mark inactive
             $a = $db->update(
-                "UPDATE wip_t_project_closure_acctpair SET is_active = 0
-                 WHERE wip_t_project_closure_id = {$d['closure_id']}"
+                "UPDATE wip_t_project_closure_acctpair
+                    SET is_active = 0, updated = ?, date_updated = NOW()
+                  WHERE wip_t_project_closure_id = {$d['closure_id']}",
+                [$UPD_TAG]
             );
             $say("    UPDATE acctpair is_active=0: affected=$a");
 
             // 3. Memorial Lot balance: decrement (must adjust shared row)
             $a = $db->update(
-                "UPDATE acct_balance SET debit = debit - ? WHERE acct_balance_id = ?",
-                [$AMT, $d['ml_bal_id']]
+                "UPDATE acct_balance
+                    SET debit = debit - ?, updated = ?, date_updated = NOW()
+                  WHERE acct_balance_id = ?",
+                [$AMT, $UPD_TAG, $d['ml_bal_id']]
             );
             $say("    UPDATE acct_balance ML(" . $d['ml_bal_id'] . ") debit -= " . $money($AMT) . ": affected=$a");
             if ($a !== 1) throw new \RuntimeException("ML balance update affected $a");
 
             // 4. WIP balance row: zero out
             $a = $db->update(
-                "UPDATE acct_balance SET debit = 0, credit = 0 WHERE acct_balance_id = ?",
-                [$d['wip_bal_id']]
+                "UPDATE acct_balance
+                    SET debit = 0, credit = 0, updated = ?, date_updated = NOW()
+                  WHERE acct_balance_id = ?",
+                [$UPD_TAG, $d['wip_bal_id']]
             );
             $say("    UPDATE acct_balance WIP(" . $d['wip_bal_id'] . ") debit=0, credit=0: affected=$a");
             if ($a !== 1) throw new \RuntimeException("WIP balance soft-delete affected $a");
 
             // 5. acct_gl rows: zero out
             $a = $db->update(
-                "UPDATE acct_gl SET debit = 0, credit = 0
-                 WHERE acct_gl_id IN (" . implode(',', $d['acct_gl_ids']) . ")"
+                "UPDATE acct_gl
+                    SET debit = 0, credit = 0, updated = ?, date_updated = NOW()
+                  WHERE acct_gl_id IN (" . implode(',', $d['acct_gl_ids']) . ")",
+                [$UPD_TAG]
             );
             $say("    UPDATE acct_gl(2) debit=0, credit=0: affected=$a");
             if ($a !== 2) throw new \RuntimeException("acct_gl soft-delete affected $a");
 
             // 6. wip_t_project_closure: mark VOID, zero amount
             $a = $db->update(
-                "UPDATE wip_t_project_closure SET amt_closure = 0, docstatus = 'VO'
-                 WHERE wip_t_project_closure_id = {$d['closure_id']}"
+                "UPDATE wip_t_project_closure
+                    SET amt_closure = 0, docstatus = 'VO', updated = ?, date_updated = NOW()
+                  WHERE wip_t_project_closure_id = {$d['closure_id']}",
+                [$UPD_TAG]
             );
             $say("    UPDATE closure(" . $d['closure_id'] . ") amt=0, docstatus=VO: affected=$a");
             if ($a !== 1) throw new \RuntimeException("closure soft-delete affected $a");
 
             // 7. acct_doc: mark inactive
             $a = $db->update(
-                "UPDATE acct_doc SET is_active = 0 WHERE acct_doc_id = {$d['acct_doc_id']}"
+                "UPDATE acct_doc
+                    SET is_active = 0, updated = ?, date_updated = NOW()
+                  WHERE acct_doc_id = {$d['acct_doc_id']}",
+                [$UPD_TAG]
             );
             $say("    UPDATE acct_doc(" . $d['acct_doc_id'] . ") is_active=0: affected=$a");
         }
