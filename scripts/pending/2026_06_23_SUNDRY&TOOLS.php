@@ -7,8 +7,8 @@
 //   failed to write when the project's cycles ran in 2025.
 //
 // AUDIT TAGS (per 2026-06-29 convention):
-//   created = 'SCRIPT-WEB'   (no IMS reference — Dev-discovered finding)
-//   updated = 'SCRIPT-WEB'   (when UPDATEs are made)
+//   created = 'IMS-SCRIPT-WEB-16523'   (IMS#16523 references this finding)
+//   updated = 'IMS-SCRIPT-WEB-16523'   (when UPDATEs are made)
 //
 // DEFECT:
 //   Project 11455 (RP INTERMENT BACKDROP) closed to asset 3008 via 3 cycles in 2025:
@@ -50,8 +50,8 @@ return function ($cmd) {
     $AMT              = 49847.62;
     $TOL              = 0.01;
 
-    // Audit marker — no IMS for this fix (Dev-discovered)
-    $TAG              = 'SCRIPT-WEB';
+    // Audit marker — IMS#16523
+    $TAG              = 'IMS-SCRIPT-WEB-16523';
 
     // Pre-existing accountability + reference numbers (looked up Jun 27)
     $ACC_CYCLE2_REV   = 11312;        // ast_l_asset_accountability for NWPCLRAST00012
