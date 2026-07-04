@@ -1,58 +1,59 @@
 <?php // scripts/pending/2026_07_04_backfill_acct_balance_agrigr_gr.php
 /**
  * ============================================================================
- * ONE-TIME BACKFILL — post the acct_balance entries that AGRIGR's GR posting
- * (PoStatusController) wrote to acct_gl but never to acct_balance.
+ * REPAIR acct_balance for AGRIGR GR postings.  (IDEMPOTENT)
  * Date: 2026-07-04 · Target: mysql_secondary (SAS SAERPRP)
  * ============================================================================
  *
  * WHY: SAERP ledger reports (Inventory Integrity per Product Category, etc.)
- * read balances from acct_balance. The GR posted acct_gl only, so the GR-side
- * debits/credits never reached the rollup — draining CMI-Suspense (11313)
- * deeply negative and desyncing the stock-card from GL.
+ * read balances from acct_balance. AGRIGR's GR (PoStatusController) wrote
+ * acct_gl only — the GR-side entries never reached the rollup, draining
+ * CMI-Suspense (11313) deeply negative and desyncing the stock-card from GL.
  *
- * WHAT IT TOUCHES — only AGRIGR GR-side rows (created='SYSTEM'), identified by
- * account + side (GR and IGR post OPPOSITE sides; the IGR side is already in
- * acct_balance via InvoiceController::postToAcctBalance):
- *     11313 DEBIT   (GR; IGR credits it)
- *     21138 CREDIT  (GR; IGR debits it)
- *     92005 DEBIT   (GR; IGR credits it)
- * 11309 is IGR-only and already balanced — NOT touched.
+ * WHAT IT DOES: for every acct_balance key that has an AGRIGR GR-side row
+ * (created='SYSTEM'), it enforces the correct invariant
  *
- * It replays each missing GR contribution into acct_balance using the SAME
- * net-upsert logic as postToAcctBalance (key: date_gl, doc_i_submod_id,
- * gl_acct_id, ad_org_id, gl_subacct_id).
+ *       acct_balance(key) = net of acct_gl(key)
  *
- * ⚠ RUN ONCE. NOT idempotent — a second run would double-post. Once this file
- * moves to scripts/done/ the pipeline will not run it again on this branch;
- * do not move it back to pending/ after a successful run. This script COMMITS.
+ * key = (date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id).
+ * It SETS the balance (not add), so it is IDEMPOTENT and ORDER-INDEPENDENT:
+ * run it any number of times, before or after the PoStatusController code fix
+ * is deployed — it always lands on the same correct value (0 delta on re-run).
  *
- * Verify against the known reconciliation (org 162012):
- *   11313 current -830,866.20  ->  projected ~ +254,840  (sane uninvoiced-GR suspense)
+ * Accounts in scope: 11313 (CMI Suspense), 21138 (GRNI), 92005 (Input Tax).
+ * 11309 is IGR-only (already balanced) — NOT touched.
+ *
+ * TRACEABILITY: every row this script writes is marked updated='SCRIPT-WEB'
+ * (inserts also created='SCRIPT-WEB'). Find/rollback via that marker.
+ *
+ * WHAT IT TOUCHES: acct_balance only. Reads acct_gl (never modified).
+ * Verified: no native (non-SYSTEM) acct_balance row shares an AGRIGR-GR key,
+ * so only AGRIGR-originated balance rows are affected. This script COMMITS.
  */
 
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary');
     set_time_limit(0);
-
-    echo "*** COMMIT MODE — writing acct_balance ***\n";
+    echo "*** COMMIT (idempotent) — writing acct_balance [updated=SCRIPT-WEB] ***\n";
     $t0 = microtime(true);
 
-    // 1. Aggregate the missing GR-side contributions per acct_balance key.
+    // 1. Correct net(acct_gl) per key, restricted to keys that have an AGRIGR
+    //    GR-side row (created='SYSTEM' on the GR side of these accounts).
     $keys = $db->select("
       SELECT date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id,
              ROUND(SUM(debit),2)  AS dr,
              ROUND(SUM(credit),2) AS cr,
-             COUNT(*)             AS n
+             SUM(CASE WHEN created='SYSTEM' AND (
+                   (gl_acct_id = 11313 AND debit  > 0) OR
+                   (gl_acct_id = 21138 AND credit > 0) OR
+                   (gl_acct_id = 92005 AND debit  > 0)) THEN 1 ELSE 0 END) AS has_gr
       FROM acct_gl
-      WHERE created='SYSTEM' AND (
-            (gl_acct_id = 11313 AND debit  > 0) OR
-            (gl_acct_id = 21138 AND credit > 0) OR
-            (gl_acct_id = 92005 AND debit  > 0))
-      GROUP BY date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id");
-    echo "GR-side acct_balance keys to backfill: " . count($keys) . "\n";
+      WHERE gl_acct_id IN (11313,21138,92005)
+      GROUP BY date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id
+      HAVING has_gr > 0");
+    echo "acct_balance keys to repair: " . count($keys) . "\n";
 
-    // 2. Current balances (before) for context.
+    // 2. Current full-account balances (before) for the report.
     $before = [];
     foreach ($db->select("
         SELECT ad_org_id, gl_acct_id, ROUND(SUM(debit)-SUM(credit),2) net
@@ -61,38 +62,38 @@ return function ($cmd) {
         $before[$r->ad_org_id.'|'.$r->gl_acct_id] = (float) $r->net;
     }
 
-    $added = [];           // (org|acct) => net (dr-cr) added
+    $delta = [];          // (org|acct) => net change applied
     $inserted = 0; $updated = 0;
 
     $db->beginTransaction();
     try {
         foreach ($keys as $r) {
-            $dr = (float) $r->dr; $cr = (float) $r->cr;
-            $ak = $r->ad_org_id.'|'.$r->gl_acct_id;
-            $added[$ak] = ($added[$ak] ?? 0) + ($dr - $cr);
+            $target = round((float) $r->dr - (float) $r->cr, 2);   // acct_balance(key) MUST equal net(acct_gl)
 
-            // net-upsert mirrors postToAcctBalance
             $ex = $db->selectOne(
                 "SELECT acct_balance_id, debit, credit FROM acct_balance
                  WHERE date_gl = ? AND gl_acct_id = ? AND ad_org_id = ?
                    AND doc_i_submod_id <=> ? AND gl_subacct_id <=> ? LIMIT 1",
                 [$r->date_gl, $r->gl_acct_id, $r->ad_org_id, $r->doc_i_submod_id, $r->gl_subacct_id]
             );
+            $cur = $ex ? round(((float) $ex->debit) - ((float) $ex->credit), 2) : 0.0;
+            $ak  = $r->ad_org_id.'|'.$r->gl_acct_id;
+            $delta[$ak] = round(($delta[$ak] ?? 0) + ($target - $cur), 2);
+
+            $nd = $target < 0 ? 0.0 : $target;
+            $nc = $target < 0 ? round(-$target, 2) : 0.0;
 
             if (! $ex) {
                 $db->insert(
                     "INSERT INTO acct_balance
-                     (date_gl,doc_i_submod_id,ad_org_id,gl_acct_id,gl_subacct_id,debit,credit,is_active,created,date_created)
-                     VALUES (?,?,?,?,?,?,?,1,'SYSTEM',NOW())",
-                    [$r->date_gl, $r->doc_i_submod_id, $r->ad_org_id, $r->gl_acct_id, $r->gl_subacct_id, $dr, $cr]
+                     (date_gl,doc_i_submod_id,ad_org_id,gl_acct_id,gl_subacct_id,debit,credit,is_active,created,date_created,updated,date_updated)
+                     VALUES (?,?,?,?,?,?,?,1,'SCRIPT-WEB',NOW(),'SCRIPT-WEB',NOW())",
+                    [$r->date_gl, $r->doc_i_submod_id, $r->ad_org_id, $r->gl_acct_id, $r->gl_subacct_id, $nd, $nc]
                 );
                 $inserted++;
             } else {
-                $net = ((float) $ex->debit) - ((float) $ex->credit) + $dr - $cr;
-                $nd = $net < 0 ? 0.0 : $net;
-                $nc = $net < 0 ? -$net : 0.0;
                 $db->update(
-                    "UPDATE acct_balance SET debit=?, credit=?, updated='SYSTEM', date_updated=NOW()
+                    "UPDATE acct_balance SET debit=?, credit=?, updated='SCRIPT-WEB', date_updated=NOW()
                      WHERE acct_balance_id=?",
                     [$nd, $nc, $ex->acct_balance_id]
                 );
@@ -106,19 +107,19 @@ return function ($cmd) {
         throw $e;
     }
 
-    // 3. Report: before -> after per (org|acct).
+    // 3. Report: current -> projected (= current + delta). Re-run => delta 0.
     $nm = [11313 => 'CMI-Suspense', 21138 => 'GRNI', 92005 => 'InputTax'];
-    echo "\n  org|acct        (name)          before        + added   =  projected\n";
-    echo "  " . str_repeat('-', 72) . "\n";
-    ksort($added);
-    foreach ($added as $ak => $add) {
+    echo "\n  org|acct        (name)            current        + change   =  projected\n";
+    echo "  " . str_repeat('-', 74) . "\n";
+    ksort($delta);
+    foreach ($delta as $ak => $d) {
         [$org, $acct] = explode('|', $ak);
         $b = $before[$ak] ?? 0.0;
         printf("  %-15s %-12s %14s %14s   %14s\n",
-            $ak, $nm[$acct] ?? '', number_format($b, 2), number_format($add, 2), number_format($b + $add, 2));
+            $ak, $nm[$acct] ?? '', number_format($b, 2), number_format($d, 2), number_format($b + $d, 2));
     }
 
-    echo "\nCOMMITTED. keys applied=" . count($keys) . " (inserted=$inserted, updated=$updated)\n";
+    echo "\nCOMMITTED (idempotent). keys=" . count($keys) . " inserted=$inserted updated=$updated\n";
     printf("elapsed %.1fs\n", microtime(true) - $t0);
-    if (isset($cmd)) $cmd->info("acct_balance backfill: {$inserted} inserted, {$updated} updated.");
+    if (isset($cmd)) $cmd->info("acct_balance repair: {$inserted} inserted, {$updated} updated (updated=SCRIPT-WEB).");
 };

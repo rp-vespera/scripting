@@ -19,6 +19,12 @@
  *   wrong, and only within (sku, locator) groups AGRIGR posted to.
  *   Data only — no schema/logic change.
  *
+ * IDEMPOTENT: qtybalance is recomputed from qtymovement, so a clean re-run
+ * finds nothing to fix (0 rows). Safe to run any number of times.
+ *
+ * TRACEABILITY: every corrected row is marked updated='SCRIPT-WEB'
+ * (date_updated=NOW()). Find/rollback via that marker or the backup table.
+ *
  * SAFETY
  * ------
  *   - Before any write, snapshots every affected group into
@@ -88,7 +94,9 @@ return function ($cmd) {
         $n = 0;
         foreach ($fixes as $f) {
             $n += $db->update(
-                "UPDATE nvt_l_stockcard_locatorqty SET qtybalance=? WHERE nvt_l_stockcard_locatorqty_id=?",
+                "UPDATE nvt_l_stockcard_locatorqty
+                    SET qtybalance=?, updated='SCRIPT-WEB', date_updated=NOW()
+                  WHERE nvt_l_stockcard_locatorqty_id=?",
                 [$f['to'], $f['id']]
             );
         }
