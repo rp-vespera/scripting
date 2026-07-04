@@ -49,6 +49,13 @@
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary');
 
+    // Deployment date — used for every date_updated / date_created stamp.
+    // Per feedback_script_audit_tag_convention: date_updated = deployment
+    // date (never runtime UTC_TIMESTAMP or current-time). Update this to the
+    // actual go-live date before running on staging/prod so the audit trail matches
+    // when the fix landed (not when the row was materially inserted).
+    $DEPLOY_DATE      = '2026-07-04 00:00:00';
+
     // Constants
     $ASSET_ID         = 3008;
     $GL_ACCT          = 12115;
@@ -169,7 +176,7 @@ return function ($cmd) {
             // 1. NEW-schema docline (SAERP convention: asset/project name)
             $db->insert(
                 "INSERT INTO ast_l_asset_docline (description, a_l_asset_docline_id, created, date_created)
-                 VALUES (?, NULL, ?, NOW())",
+                 VALUES (?, NULL, ?, '{$DEPLOY_DATE}')",
                 [$DOCLINE_DESC, $TAG]
             );
             $newDoclineIds[$i] = (int) $db->getPdo()->lastInsertId();
@@ -180,7 +187,7 @@ return function ($cmd) {
                 "INSERT INTO ast_l_asset_accountability
                  (documentno, date_gl, date_trans, ast_i_asset_id, bpar_i_person_id,
                   doc_t_reference_number_id, created, date_created)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, '{$DEPLOY_DATE}')",
                 [$c['documentno'], $c['date_gl'], $c['date_trans'], $ASSET_ID, $BPAR_PERSON_ID, $c['ref_id'], $TAG]
             );
             $newAccIds[$i] = (int) $db->getPdo()->lastInsertId();
@@ -192,7 +199,7 @@ return function ($cmd) {
                  (ast_l_asset_accountability_id, ast_l_asset_docline_id, doc_i_submod_id, documentno,
                   date_trans, date_gl, ad_org_id, is_active, amount, is_asset_acct, is_glitem_acct,
                   transaction_type, doc_t_reference_number_id, created, date_created)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 0, 'PROJECT', ?, ?, NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 0, 'PROJECT', ?, ?, '{$DEPLOY_DATE}')",
                 [$newAccIds[$i], $newDoclineIds[$i], $SUBMOD_WPCL_AST, $c['documentno'],
                  $c['date_trans'], $c['date_gl'], $ORG, $AMT, $c['ref_id'], $TAG]
             );
@@ -202,7 +209,7 @@ return function ($cmd) {
             // 4. LEGACY docline (no 'created' column on this table)
             $db->insert(
                 "INSERT INTO a_l_asset_docline (description, date_created, is_active)
-                 VALUES (?, NOW(), 1)",
+                 VALUES (?, '{$DEPLOY_DATE}', 1)",
                 [$DOCLINE_DESC]
             );
             $legacyDoclineIds[$i] = (int) $db->getPdo()->lastInsertId();
@@ -212,7 +219,7 @@ return function ($cmd) {
             $db->insert(
                 "INSERT INTO a_l_asset_accountability
                  (documentno, date_gl, date_trans, a_asset_id, s_bpartner_id, created, date_created)
-                 VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, '{$DEPLOY_DATE}')",
                 [$c['documentno'], $c['date_gl'], $c['date_trans'], $LEGACY_ASSET_ID, $LEGACY_BPARTNER, $TAG]
             );
             $legacyAccIds[$i] = (int) $db->getPdo()->lastInsertId();
@@ -224,7 +231,7 @@ return function ($cmd) {
                  (a_l_asset_accountability_id, date_trans, date_gl, ad_org_id, is_active, amount,
                   is_asset_acct, is_glitem_acct, transaction_type, documentno, a_l_asset_docline_id,
                   created, date_created)
-                 VALUES (?, ?, ?, ?, NULL, ?, 0, 0, 'PROJECT', ?, ?, ?, NOW())",
+                 VALUES (?, ?, ?, ?, NULL, ?, 0, 0, 'PROJECT', ?, ?, ?, '{$DEPLOY_DATE}')",
                 [$legacyAccIds[$i], $c['date_trans'], $c['date_gl'], $ORG, $AMT,
                  $c['documentno'], $legacyDoclineIds[$i], $TAG]
             );
@@ -236,17 +243,17 @@ return function ($cmd) {
         $say(""); $say("  -- bridge new→legacy --");
         foreach ($CLOSURES as $i => $c) {
             $db->update(
-                "UPDATE ast_l_asset_docline SET a_l_asset_docline_id = ?, updated = ?, date_updated = NOW()
+                "UPDATE ast_l_asset_docline SET a_l_asset_docline_id = ?, updated = ?, date_updated = '{$DEPLOY_DATE}'
                  WHERE ast_l_asset_docline_id = ?",
                 [$legacyDoclineIds[$i], $TAG, $newDoclineIds[$i]]
             );
             $db->update(
-                "UPDATE ast_l_asset_accountability SET a_l_asset_accountability_id = ?, updated = ?, date_updated = NOW()
+                "UPDATE ast_l_asset_accountability SET a_l_asset_accountability_id = ?, updated = ?, date_updated = '{$DEPLOY_DATE}'
                  WHERE ast_l_asset_accountability_id = ?",
                 [$legacyAccIds[$i], $TAG, $newAccIds[$i]]
             );
             $db->update(
-                "UPDATE ast_l_asset_history SET a_l_asset_history_id = ?, updated = ?, date_updated = NOW()
+                "UPDATE ast_l_asset_history SET a_l_asset_history_id = ?, updated = ?, date_updated = '{$DEPLOY_DATE}'
                  WHERE ast_l_asset_history_id = ?",
                 [$legacyHistIds[$i], $TAG, $newHistIds[$i]]
             );
@@ -255,7 +262,7 @@ return function ($cmd) {
 
         // 8. project_type ACCESSORY → ACCESSION (required for Asset Ledger Detail JRXML v2)
         $a = $db->update(
-            "UPDATE wip_i_project SET project_type = 'ACCESSION', updated = ?, date_updated = NOW()
+            "UPDATE wip_i_project SET project_type = 'ACCESSION', updated = ?, date_updated = '{$DEPLOY_DATE}'
              WHERE wip_i_project_id = ? AND project_type = 'ACCESSORY'",
             [$TAG_PROJTYPE, $PROJECT_ID]
         );
