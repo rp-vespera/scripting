@@ -78,42 +78,44 @@ return function ($cmd) {
         // ===== 1+2. NEW SCHEMA: ast_l_asset_history + ast_l_asset_docline =====
 
         // 1a. NEW docline for NWPCL-AST00080
+        // Description follows SAERP convention: asset/project name only (matches pre-existing
+        // docline 6413 for NWPCLRAST00012 reversal).
         $db->insert(
             "INSERT INTO ast_l_asset_docline (description, a_l_asset_docline_id, created, date_created)
              VALUES (?, NULL, ?, NOW())",
-            ['JE WALL FORMS - Project Closure Cycle 2', $TAG]
+            ['JE WALL FORMS REPAIR AND FABRICATION', $TAG]
         );
         $newDocline1 = (int) $db->getPdo()->lastInsertId();
         $say("    INSERT ast_l_asset_docline id=$newDocline1");
 
-        // 1b. NEW docline for NWPCL-AST00094
+        // 1b. NEW docline for NWPCL-AST00094 (same SAERP wording as 1a)
         $db->insert(
             "INSERT INTO ast_l_asset_docline (description, a_l_asset_docline_id, created, date_created)
              VALUES (?, NULL, ?, NOW())",
-            ['JE WALL FORMS - Project Closure Cycle 3 (final)', $TAG]
+            ['JE WALL FORMS REPAIR AND FABRICATION', $TAG]
         );
         $newDocline2 = (int) $db->getPdo()->lastInsertId();
         $say("    INSERT ast_l_asset_docline id=$newDocline2");
 
-        // 1c. NEW history for NWPCL-AST00080
+        // 1c. NEW history for NWPCL-AST00080 — is_glitem_acct=0 explicit (was NULL default; per review 2026-07-04)
         $db->insert(
             "INSERT INTO ast_l_asset_history
              (ast_l_asset_accountability_id, ast_l_asset_docline_id, doc_i_submod_id, documentno,
-              date_trans, date_gl, ad_org_id, is_active, amount, is_asset_acct, transaction_type,
-              doc_t_reference_number_id, created, date_created)
-             VALUES (?, ?, ?, ?, '2025-03-26 11:00:00', '2025-03-26', ?, 1, ?, 0, 'PROJECT', ?, ?, NOW())",
+              date_trans, date_gl, ad_org_id, is_active, amount, is_asset_acct, is_glitem_acct,
+              transaction_type, doc_t_reference_number_id, created, date_created)
+             VALUES (?, ?, ?, ?, '2025-03-26 11:00:00', '2025-03-26', ?, 1, ?, 0, 0, 'PROJECT', ?, ?, NOW())",
             [$ACC_CYCLE2_REV, $newDocline1, $SUBMOD_WPCL_AST, 'NWPCL-AST00080', $ORG, $AMT, $REF_NWPCL080, $TAG]
         );
         $newAstHist1 = (int) $db->getPdo()->lastInsertId();
         $say("    INSERT ast_l_asset_history id=$newAstHist1 (NWPCL-AST00080 +" . $money($AMT) . ")");
 
-        // 1d. NEW history for NWPCL-AST00094
+        // 1d. NEW history for NWPCL-AST00094 — is_glitem_acct=0 explicit (was NULL default; per review 2026-07-04)
         $db->insert(
             "INSERT INTO ast_l_asset_history
              (ast_l_asset_accountability_id, ast_l_asset_docline_id, doc_i_submod_id, documentno,
-              date_trans, date_gl, ad_org_id, is_active, amount, is_asset_acct, transaction_type,
-              doc_t_reference_number_id, created, date_created)
-             VALUES (?, ?, ?, ?, '2025-10-13 09:00:00', '2025-10-13', ?, 1, ?, 0, 'PROJECT', ?, ?, NOW())",
+              date_trans, date_gl, ad_org_id, is_active, amount, is_asset_acct, is_glitem_acct,
+              transaction_type, doc_t_reference_number_id, created, date_created)
+             VALUES (?, ?, ?, ?, '2025-10-13 09:00:00', '2025-10-13', ?, 1, ?, 0, 0, 'PROJECT', ?, ?, NOW())",
             [$ACC_ARQ_ORIG, $newDocline2, $SUBMOD_WPCL_AST, 'NWPCL-AST00094', $ORG, $AMT, $REF_NWPCL094, $TAG]
         );
         $newAstHist2 = (int) $db->getPdo()->lastInsertId();
@@ -121,20 +123,20 @@ return function ($cmd) {
 
         // ===== 3+4. LEGACY SCHEMA: a_l_asset_history + a_l_asset_docline =====
 
-        // 2a. LEGACY docline for NWPCL-AST00080 (note: a_l_asset_docline has no 'created' column)
+        // 2a. LEGACY docline for NWPCL-AST00080 (same SAERP wording as 1a; note: no 'created' column)
         $db->insert(
             "INSERT INTO a_l_asset_docline (description, date_created, is_active)
              VALUES (?, NOW(), 1)",
-            ['JE WALL FORMS - Project Closure Cycle 2']
+            ['JE WALL FORMS REPAIR AND FABRICATION']
         );
         $legacyDocline1 = (int) $db->getPdo()->lastInsertId();
         $say("    INSERT a_l_asset_docline id=$legacyDocline1 (legacy)");
 
-        // 2b. LEGACY docline for NWPCL-AST00094
+        // 2b. LEGACY docline for NWPCL-AST00094 (same SAERP wording)
         $db->insert(
             "INSERT INTO a_l_asset_docline (description, date_created, is_active)
              VALUES (?, NOW(), 1)",
-            ['JE WALL FORMS - Project Closure Cycle 3 (final)']
+            ['JE WALL FORMS REPAIR AND FABRICATION']
         );
         $legacyDocline2 = (int) $db->getPdo()->lastInsertId();
         $say("    INSERT a_l_asset_docline id=$legacyDocline2 (legacy)");
