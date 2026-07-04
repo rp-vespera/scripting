@@ -42,15 +42,14 @@ return function ($cmd) {
     $keys = $db->select("
       SELECT date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id,
              ROUND(SUM(debit),2)  AS dr,
-             ROUND(SUM(credit),2) AS cr,
-             SUM(CASE WHEN created='SYSTEM' AND (
-                   (gl_acct_id = 11313 AND debit  > 0) OR
-                   (gl_acct_id = 21138 AND credit > 0) OR
-                   (gl_acct_id = 92005 AND debit  > 0)) THEN 1 ELSE 0 END) AS has_gr
+             ROUND(SUM(credit),2) AS cr
       FROM acct_gl
       WHERE gl_acct_id IN (11313,21138,92005)
       GROUP BY date_gl, doc_i_submod_id, gl_acct_id, ad_org_id, gl_subacct_id
-      HAVING has_gr > 0");
+      HAVING SUM(CASE WHEN created='SYSTEM' AND (
+                   (gl_acct_id = 11313 AND debit  > 0) OR
+                   (gl_acct_id = 21138 AND credit > 0) OR
+                   (gl_acct_id = 92005 AND debit  > 0)) THEN 1 ELSE 0 END) > 0");
     echo "acct_balance keys to repair: " . count($keys) . "\n";
 
     // 2. Current full-account balances (before) for the report.
