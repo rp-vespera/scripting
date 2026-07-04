@@ -1,45 +1,4 @@
-<?php // scripts/pending/2026_06_23_SUNDRY&TOOLS.php
-// Asset 3008 JE WALL FORMS — Asset Integrity fix
-// Account 12115 SUNDRY, TOOLS, AND OTHERS / org 162012 RP Tan A
-//
-// CREATED 2026-06-27: backfills the missing closure entries in ast_l_asset_history
-//   (and legacy a_l_asset_history) that SAERP's Project Closure workflow
-//   failed to write when the project's cycles ran in 2025.
-//
-// AUDIT TAGS (per 2026-06-29 convention):
-//   created = 'IMS-SCRIPT-WEB-16523'   (IMS#16523 references this finding)
-//   updated = 'IMS-SCRIPT-WEB-16523'   (when UPDATEs are made)
-//
-// DEFECT:
-//   Project 11455 (RP INTERMENT BACKDROP) closed to asset 3008 via 3 cycles in 2025:
-//     Cycle 1: NWPCL-ACPR01537 (Feb 24) + NWPCLRACPR00225 reversal (Mar 3) — net 0
-//     Cycle 2: NWPCL-AST00080  (Mar 26) + NWPCLRAST00012 reversal (Mar 26) — net 0
-//     Cycle 3: NWPCL-AST00094  (Oct 13) — stuck, no reversal (net +49,847.62)
-//   Plus consumption NIRQ0002421 (Apr 9, 2026) +3,780.
-//
-//   GL correctly shows asset 3008 at ₱53,627.62.
-//   But ast_l_asset_history only has 1 entry (NWPCLRAST00012 -49,847.62) + NIRQ +3,780
-//   = -46,067.62 (broken).
-//
-//   SAERP's workflow wrote the cycle 2 reversal to history but NOT the cycle 2 closure
-//   itself, NOT cycle 3 closure either. The other 3 events stayed in GL only.
-//
-// FIX CASCADE (FK-safe order, all INSERTs):
-//   1. ast_l_asset_history (NEW schema) ×2 — the missing closure entries
-//      - NWPCL-AST00080  +49,847.62  (cycle 2 closure)
-//      - NWPCL-AST00094  +49,847.62  (cycle 3 closure)
-//   2. ast_l_asset_docline (NEW schema) ×2 — descriptive labels for the above
-//   3. a_l_asset_history (LEGACY schema) ×2 — same closures, for SAERP UI report's join
-//   4. a_l_asset_docline (LEGACY schema) ×2 — legacy labels
-//   5. UPDATE ast_l_asset_history rows linking them to (3) and (4) + reference numbers
-//
-// Effect:
-//   Asset 3008 history net:  -46,067.62 → +53,627.62  (matches GL)
-//   Variance (FRS Scanner):   99,695.24 → 0          ✓
-//   Variance (SAERP Asset Integrity Summary):  53,627.62 → 0  ✓
-//   SAERP Asset Ledger Detail report:  unchanged (movement report, by design)
-//
-// REPLICA-TESTED 2026-06-27 — full 4-table cascade validated end-to-end.
+<?php
 
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary');
