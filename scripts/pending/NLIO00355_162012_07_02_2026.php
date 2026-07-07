@@ -1,14 +1,15 @@
 <?php // scripts/pending/NLIO00355_162012_07_02_2026.php
 // NLIO00355 - CONCRETE VAULT (project 5654, org 162012 RP Tan A)
-// Fix: soft-delete DUPLICATE closure NWPCL-NVT0000411
+// Fix: soft-delete DUPLICATE closure NWPCL-NVT0000411.
 //
 // Root cause: 2 closures posted for same 1,932.96 consumption
-//   NWPCL-NVT0000143 (2023-11-09) — legit closure
-//   NWPCL-NVT0000411 (2025-09-18) — duplicate posted 2 years later, over-drained WIP
-// Someone tried to reverse it via NVT0000124DR but it's stuck in DR (not processed).
-// Result: WIP is at -1,932.96 (should be 0). Scanner shows +1,932.96 variance.
+//   NWPCL-NVT0000143 (2023-11-09) — legit closure by APRIL JOY CALANZA (MKR) + RAFFY MAYANG (CKR)
+//   NWPCL-NVT0000411 (2025-09-18) — duplicate by JAMES EARL MENDOZA (MKR) + KARL ADRIAN SISON (CKR)
+// SAERP allowed this because its "already closed" check is on project_status,
+// but the legit 2023 closure didn't auto-flip project_status → COMMENCED remained
+// → SAERP happily processed the duplicate → WIP over-drained by 1,932.96.
 //
-// Fix cascade (8 UPDATEs, no DELETE):
+// Fix cascade (8 UPDATEs, no DELETE) — soft-delete duplicate only:
 //   closure 25071 amt=0 (keep docstatus=PR per senior's rule)
 //   contra 1867 is_active=0 (breaks the stuck-reversal link)
 //   signees 47105, 47120 is_active=0
@@ -18,15 +19,20 @@
 //   acct_balance 822063 debit=0 credit=0 (12502 side, exclusive row)
 //   acct_doc 103783708 is_active=0
 //
+// Project row (wip_i_project 5654) is NOT touched — project stays CLOSED
+// (per Sir Stan's directive: "should not be reopened"). SAERP's CLOSED-status
+// blocks will prevent new consumption/closures via UI + rpv-backend endpoints.
+//
 // After: WIP net -1,932.96 → 0.00
-// Every UPDATE tagged updated='IMS-SCRIPT-WEB-15862', date_updated=deploy date
+// Every UPDATE tagged updated='IMS-SCRIPT-WEB-15862', date_updated=script run time.
 
 return function ($cmd) {
     $db  = \DB::connection('mysql_secondary');
 
-    // Deployment date — update to actual go-live before running on staging/prod
-    // (per feedback_script_audit_tag_convention: date_updated = deploy date).
-    $DEPLOY_DATE = '2026-07-04 00:00:00';
+    // Deploy date is captured ONCE at script start so every UPDATE in this run
+    // shares the same timestamp. Rollback normalizes both fields back to NULL
+    // regardless of what value was applied here.
+    $DEPLOY_DATE = date('Y-m-d H:i:s');
 
     $TAG = 'IMS-SCRIPT-WEB-15862';
     $AMT = 1932.96;
@@ -39,6 +45,7 @@ return function ($cmd) {
     $say($line);
     $say(' NLIO00355 - CONCRETE VAULT — soft-delete duplicate closure NWPCL-NVT0000411');
     $say(' Effect: WIP variance -1,932.96 → 0.00 (org 162012, subacct 25822)');
+    $say(' Deploy timestamp: ' . $DEPLOY_DATE);
     $say($line);
 
     // IDEMPOTENCY — if closure 25071 already zeroed, skip
@@ -101,5 +108,6 @@ return function ($cmd) {
 
     $say(''); $say($line);
     $say(' SUCCESS — NLIO00355 duplicate closure soft-deleted. WIP variance closed.');
+    $say(' Project 5654 status: CLOSED (unchanged per Sir Stan directive).');
     $say($line);
 };
