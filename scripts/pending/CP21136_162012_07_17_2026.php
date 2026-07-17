@@ -1,33 +1,30 @@
 <?php // scripts/pending/CP21136_162012_07_17_2026.php
-// IMS-SCRIPT-13714 — Commission Payable (21136) Group-A aging reconciliation, RP Tan A (org 162012)
-// *** WITH A REAL ADJUSTMENT DOCUMENT *** (no NULL doc_i_submod_id / doc_t_reference_number_id).
+// IMS-SCRIPT #13714 — Commission Payable (21136) Group-A aging reconciliation, RP Tan A (org 162012)
+// *** WITH A REAL ADJUSTMENT DOCUMENT + FULL AUDIT STAMPS *** (no NULL doc refs, no NULL updated).
 //
 // Creates ONE real adjustment reference in doc_t_reference_number (submodule GJL-CP = 413 — the
-// document type the accountants use for their manual commission reversals), documentno
-// NADJCP0013714, then posts the 3 Group-A settlement rows into fin_l_debt_history LINKED to that
-// reference, so each row is fully traceable (real submodule + reference, no NULLs).
+// document type used for the manual commission reversals), documentno NADJCP0013714, then posts
+// the 3 Group-A settlement rows into fin_l_debt_history LINKED to that reference. Every row carries
+// real doc_i_submod_id + doc_t_reference_number_id AND full audit stamps:
+//     created / updated      = 'SCRIPT-WEB'
+//     date_created / date_updated = the run timestamp (when the script was executed)
 //
 //   3341 CHIU, VALENTIN S.   -20,720.00
 //   7925 EMP-SALAZAR, RHEA   -12,800.00
 //   1052 PADRONES, ANGEL REX  -2,640.00      GROUP A TOTAL = -36,160.00
 //
-// WHY THE GUARD CHANGED: the account-level variance is VOLATILE — the "WEB Commission" (NAGCR)
-// tool churns other agents on this DB live, so the whole-account number moves (that's why the old
-// 52,851.27 guard aborted). The 3 Group-A agents, however, are STABLE (their GL is frozen since
-// 2023). So this version guards PER AGENT — each agent's excess must equal its known value — and
-// ignores the volatile account total. That makes the fix correct no matter what the web tool does
-// to Groups B/C.
-//
-// GL / acct_balance are NOT touched. Groups B/C NOT touched. Idempotent.
+// Guards PER AGENT (each excess must equal its known value) — NOT on the volatile account total
+// (the WEB Commission tool churns other agents live). GL / acct_balance NOT touched. Groups B/C
+// NOT touched. Idempotent (keyed on the unique documentno NADJCP0013714).
 // Rollback: CP21136_162012_07_17_2026_ROLLBACK.php
 
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary');
 
-    $TAG     = 'IMS-SCRIPT-13714';
-    $DOCNO   = 'NADJCP0013714';          // adjustment doc number (custom; won't collide with live docs)
+    $AUDIT   = 'SCRIPT-WEB';             // created / updated audit user
+    $DOCNO   = 'NADJCP0013714';          // unique adjustment doc no. — also the rollback/idempotency key
     $SUBMOD  = 413;                      // GJL-CP  (General Journal - Commission Payable)
-    $DEPLOY  = date('Y-m-d H:i:s');
+    $RUN     = date('Y-m-d H:i:s');      // when the script was run → date_created / date_updated
     $DATE_GL = date('Y-m-d');
     $ORG     = 162012;
     $ACCT    = 21136;
@@ -42,20 +39,19 @@ return function ($cmd) {
 
     $sub = "(SELECT child.ad_org_id FROM ad_org child JOIN (SELECT * FROM ad_org WHERE orgcode=$ORG) AS mother ON child.lft>=mother.lft AND child.ryt<=mother.ryt)";
 
-    // per-agent aged (direction='O' sum) and ledger (acct_balance) — the two we reconcile
     $agedOf   = fn (int $bp) => (float) $db->selectOne("SELECT ROUND(IFNULL(SUM(his.amount),0),2) v FROM fin_l_debt debt JOIN fin_l_debt_history his ON his.fin_l_debt_id=debt.fin_l_debt_id WHERE debt.ad_org_id IN $sub AND debt.status='PR' AND his.status='PR' AND his.date_gl<=DATE('$DATE_GL') AND debt.gl_acct_id=$ACCT AND debt.direction='O' AND debt.s_bpartner_id=$bp")->v;
     $ledgerOf = fn (int $bp) => (float) $db->selectOne("SELECT ROUND(IFNULL(SUM(bal.debit-bal.credit)*-1,0),2) v FROM acct_balance bal JOIN gl_subacct s2 ON s2.gl_subacct_id=bal.gl_subacct_id WHERE bal.ad_org_id IN $sub AND bal.date_gl<=DATE('$DATE_GL') AND bal.gl_acct_id=$ACCT AND s2.s_bpartner_id=$bp")->v;
 
     $say($line);
-    $say(' IMS-SCRIPT-13714 — Commission Payable (21136) Group-A reconciliation (real document)');
-    $say(' Deploy: ' . $DEPLOY . '   Doc#: ' . $DOCNO . '   Submodule: GJL-CP(' . $SUBMOD . ')');
+    $say(' IMS-SCRIPT #13714 — Commission Payable (21136) Group-A reconciliation (real document + audit stamps)');
+    $say(' Run: ' . $RUN . '   Doc#: ' . $DOCNO . '   Submodule: GJL-CP(' . $SUBMOD . ')   Audit: ' . $AUDIT);
     $say($line);
 
-    // IDEMPOTENCY
-    $already = (int) $db->selectOne("SELECT COUNT(*) n FROM fin_l_debt_history WHERE created='$TAG'")->n;
-    if ($already > 0) { $say(''); $say(" NO-OP — $already row(s) already stamped '$TAG'. Nothing to do."); $say($line); return; }
+    // IDEMPOTENCY — keyed on the unique documentno
+    $already = (int) $db->selectOne("SELECT COUNT(*) n FROM fin_l_debt_history WHERE documentno='$DOCNO'")->n;
+    if ($already > 0) { $say(''); $say(" NO-OP — $already row(s) already carry documentno '$DOCNO'. Nothing to do."); $say($line); return; }
 
-    $say(''); $say(' PRE-CHECK (per agent — account total is intentionally ignored, it is volatile):');
+    $say(''); $say(' PRE-CHECK (per agent — account total intentionally ignored, it is volatile):');
     foreach ($TARGETS as $bp => $expected) {
         $ex = round($agedOf($bp) - $ledgerOf($bp), 2);
         $say(sprintf('   bp=%-6s aging=%-11s ledger=%-11s excess=%-9s expected=%s', $bp, $money($agedOf($bp)), $money($ledgerOf($bp)), $money($ex), $money($expected)));
@@ -67,7 +63,7 @@ return function ($cmd) {
     $say(''); $say(' APPLYING (transaction):');
     $db->beginTransaction();
     try {
-        // 1) Real adjustment reference document (nothing posts to the GL).
+        // 1) Real adjustment reference document (nothing posts to the GL) — with full audit stamps.
         $refId = (int) $db->table('doc_t_reference_number')->insertGetId([
             'doc_i_submod_id' => $SUBMOD,
             'documentno_dr'   => $DOCNO,
@@ -75,14 +71,16 @@ return function ($cmd) {
             'documentno_pr'   => $DOCNO,
             'date_process'    => $DATE_GL,
             'ad_org_id'       => $ORG,
-            'created'         => $TAG,
-            'date_created'    => $DEPLOY,
+            'created'         => $AUDIT,
+            'date_created'    => $RUN,
+            'updated'         => $AUDIT,
+            'date_updated'    => $RUN,
             'is_active'       => 1,
         ]);
-        $say('   Created adjustment document: ref_id=' . $refId . '  documentno=' . $DOCNO . '  (GJL-CP)');
+        $say('   Created adjustment document: ref_id=' . $refId . '  documentno=' . $DOCNO . '  (GJL-CP)  audit=' . $AUDIT . ' @ ' . $RUN);
         $say('');
 
-        // 2) Settlement rows, each LINKED to the document.
+        // 2) Settlement rows, each LINKED to the document — with full audit stamps.
         $grand = 0.0;
         foreach ($TARGETS as $bp => $expected) {
             $name   = $db->selectOne("SELECT name1 FROM s_bpartner WHERE s_bpartner_id=$bp")->name1 ?? "($bp)";
@@ -96,9 +94,9 @@ return function ($cmd) {
 
             $ok = $db->insert(
                 "INSERT INTO fin_l_debt_history
-                   (fin_l_debt_id, date_gl, amount, documentno, created, date_created, is_active, is_creation, is_settlement, status, ad_org_id, doc_i_submod_id, doc_t_reference_number_id)
-                 VALUES (?, DATE(?), ?, ?, ?, ?, 1, 0, 1, 'PR', ?, ?, ?)",
-                [(int) $anchor->id, $DATE_GL, $adj, $DOCNO, $TAG, $DEPLOY, $ORG, $SUBMOD, $refId]
+                   (fin_l_debt_id, date_gl, amount, documentno, created, date_created, updated, date_updated, is_active, is_creation, is_settlement, status, ad_org_id, doc_i_submod_id, doc_t_reference_number_id)
+                 VALUES (?, DATE(?), ?, ?, ?, ?, ?, ?, 1, 0, 1, 'PR', ?, ?, ?)",
+                [(int) $anchor->id, $DATE_GL, $adj, $DOCNO, $AUDIT, $RUN, $AUDIT, $RUN, $ORG, $SUBMOD, $refId]
             );
             $say(sprintf('    bp=%-6s %-22s settle=%-11s submod=%s ref=%s (%s)', $bp, $name, $money($adj), $SUBMOD, $refId, $ok ? 'ok' : 'FAIL'));
             if (!$ok) throw new \RuntimeException("insert failed for bp $bp");
@@ -122,7 +120,7 @@ return function ($cmd) {
 
     $say(''); $say($line);
     $say(' SUCCESS — Group A (-' . $money($EXPECTED_TOTAL) . ') reconciled via real document ' . $DOCNO . ' (GJL-CP).');
-    $say(' Each settlement row carries doc_i_submod_id=' . $SUBMOD . ' + a real doc_t_reference_number (no NULLs).');
+    $say(' Rows carry doc_i_submod_id=' . $SUBMOD . ', a real doc_t_reference_number, and audit created/updated=' . $AUDIT . ' @ ' . $RUN . '.');
     $say(' GL / acct_balance untouched. Rollback: CP21136_162012_07_17_2026_ROLLBACK.php');
     $say($line);
 };
