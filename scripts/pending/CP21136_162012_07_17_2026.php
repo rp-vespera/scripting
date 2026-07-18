@@ -1,40 +1,38 @@
 <?php // scripts/pending/CP21136_162012_07_17_2026.php
 // IMS-SCRIPT #13714 — Commission Payable (21136) Group-A aging reconciliation, RP Tan A (org 162012)
-// *** LSPCA-STYLE CANCELLATION DOCUMENT + FULL AUDIT STAMPS *** (no NULL doc refs, no NULL updated).
+// *** LSPCA CANCELLATION DOCUMENTS + NATIVE-STYLE AUDIT STAMPS ***
 //
-// This posts the debt-side cancellation that the LSPCA (Lot Sales Payment Cancellation) run FAILED to
-// post — the exact defect in MpTLotSalesCancellationService (GL reversed, fin_l_debt did not). So it is
-// filed as an LSPCA cancellation, matching the ERP-native pattern:
-//     submodule           = LSPCA (doc_i_submod_id 164, is_contra=1)  — same type used by the 243 real
-//                           commission cancellations already on this account.
-//     documentno          = <the anchor debt's own documentno> + '-CA'   (the ERP cancellation convention,
-//                           e.g. PR-I004842 -> PR-I004842-CA), created per agent.
-// Every row carries a real doc_i_submod_id + doc_t_reference_number_id AND full audit stamps:
-//     created / updated          = 'SCRIPT-WEB'   (this value is what distinguishes our rows from the
-//                                  genuine -CA cancellations — no real cancellation uses it)
-//     date_created / date_updated = the run timestamp (when the script was executed)
+// Posts the debt-side cancellation that the LSPCA (Lot Sales Payment Cancellation) run FAILED to post —
+// the exact defect in MpTLotSalesCancellationService (GL reversed, fin_l_debt did not). Filed as LSPCA:
+//     submodule  = LSPCA (doc_i_submod_id 164, is_contra=1) — same type as the real commission
+//                  cancellations already on this account.
+//     documentno = 'LSP-13714-<nn>-CA'  ==  LSP (lot sales payment) · 13714 (the IMS ticket it is
+//                  connected to) · nn (line seq, UNIQUE per agent) · CA (cancellation).
+//                  ONE reference document per line (each links to its own doc_t_reference_number).
 //
-//   3341 CHIU, VALENTIN S.   -20,720.00
-//   7925 EMP-SALAZAR, RHEA   -12,800.00
-//   1052 PADRONES, ANGEL REX  -2,640.00      GROUP A TOTAL = -36,160.00
+// AUDIT STAMPS (native convention): created = NULL ; updated = '#IMS-13714' ; date_created/updated = run ts.
 //
-// Guards PER AGENT (each excess must equal its known value) — NOT on the volatile account total
-// (the WEB Commission tool churns other agents live). GL / acct_balance NOT touched. Groups B/C
-// NOT touched. Idempotent (keyed on created='SCRIPT-WEB' + submodule LSPCA for these agents).
+//   01  3341 CHIU, VALENTIN S.   -20,720.00   -> LSP-13714-01-CA
+//   02  7925 EMP-SALAZAR, RHEA   -12,800.00   -> LSP-13714-02-CA
+//   03  1052 PADRONES, ANGEL REX  -2,640.00   -> LSP-13714-03-CA     GROUP A TOTAL = -36,160.00
+//
+// Guards PER AGENT (each excess must equal its known value) — NOT on the volatile account total.
+// GL / acct_balance NOT touched. Idempotent + rollback keyed on updated='#IMS-13714' (submod 164).
 // Rollback: CP21136_162012_07_17_2026_ROLLBACK.php
 
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary');
 
-    $AUDIT   = 'SCRIPT-WEB';             // created / updated audit user — also the rollback discriminator
+    $DOCPREFIX = 'LSP-13714-';           // documentno = LSP-13714-<nn>-CA  (nn unique per line)
+    $DOCSUFFIX = '-CA';
+    $UPD     = '#IMS-13714';             // updated stamp = #IMS-<ticket>  — idempotency/rollback key
     $SUBMOD  = 164;                      // LSPCA  (Lot Sales Payment Cancellation, is_contra=1)
-    $CA      = '-CA';                    // ERP cancellation documentno suffix
-    $RUN     = date('Y-m-d H:i:s');      // when the script was run → date_created / date_updated
+    $RUN     = date('Y-m-d H:i:s');      // date_created / date_updated
     $DATE_GL = date('Y-m-d');
     $ORG     = 162012;
     $ACCT    = 21136;
     $TOL     = 0.01;
-    // Group A — agent => expected excess (aging - ledger). Stable/frozen; used as the per-agent guard.
+    // Group A — agent => expected excess (aging - ledger). Order defines the line seq (01,02,03).
     $TARGETS = [3341 => 20720.00, 7925 => 12800.00, 1052 => 2640.00];
     $EXPECTED_TOTAL = 36160.00;
 
@@ -49,13 +47,13 @@ return function ($cmd) {
     $ledgerOf = fn (int $bp) => (float) $db->selectOne("SELECT ROUND(IFNULL(SUM(bal.debit-bal.credit)*-1,0),2) v FROM acct_balance bal JOIN gl_subacct s2 ON s2.gl_subacct_id=bal.gl_subacct_id WHERE bal.ad_org_id IN $sub AND bal.date_gl<=DATE('$DATE_GL') AND bal.gl_acct_id=$ACCT AND s2.s_bpartner_id=$bp")->v;
 
     $say($line);
-    $say(' IMS-SCRIPT #13714 — Commission Payable (21136) Group-A reconciliation (LSPCA cancellation + audit stamps)');
-    $say(' Run: ' . $RUN . '   Submodule: LSPCA(' . $SUBMOD . ')   Doc#: <anchor documentno>' . $CA . '   Audit: ' . $AUDIT);
+    $say(' IMS-SCRIPT #13714 — Commission Payable (21136) Group-A reconciliation (LSPCA cancellation)');
+    $say(' Run: ' . $RUN . '   Submodule: LSPCA(' . $SUBMOD . ')   Doc#: ' . $DOCPREFIX . '<nn>' . $DOCSUFFIX . '   created=NULL  updated=' . $UPD);
     $say($line);
 
-    // IDEMPOTENCY — have we already posted our LSPCA rows (created='SCRIPT-WEB', submod LSPCA) for these agents?
-    $already = (int) $db->selectOne("SELECT COUNT(*) n FROM fin_l_debt_history his JOIN fin_l_debt debt ON debt.fin_l_debt_id=his.fin_l_debt_id WHERE his.created='$AUDIT' AND his.doc_i_submod_id=$SUBMOD AND debt.gl_acct_id=$ACCT AND debt.ad_org_id IN $sub AND debt.s_bpartner_id IN ($bpList)")->n;
-    if ($already > 0) { $say(''); $say(" NO-OP — $already SCRIPT-WEB LSPCA row(s) already exist for these agents. Nothing to do."); $say($line); return; }
+    // IDEMPOTENCY — keyed on the updated stamp (created is NULL, so it cannot be the discriminator).
+    $already = (int) $db->selectOne("SELECT COUNT(*) n FROM fin_l_debt_history his JOIN fin_l_debt debt ON debt.fin_l_debt_id=his.fin_l_debt_id WHERE his.updated='$UPD' AND his.doc_i_submod_id=$SUBMOD AND debt.gl_acct_id=$ACCT AND debt.ad_org_id IN $sub AND debt.s_bpartner_id IN ($bpList)")->n;
+    if ($already > 0) { $say(''); $say(" NO-OP — $already row(s) already carry updated='$UPD' for these agents. Nothing to do."); $say($line); return; }
 
     $say(''); $say(' PRE-CHECK (per agent — account total intentionally ignored, it is volatile):');
     foreach ($TARGETS as $bp => $expected) {
@@ -69,27 +67,20 @@ return function ($cmd) {
     $say(''); $say(' APPLYING (transaction):');
     $db->beginTransaction();
     try {
-        $grand = 0.0;
+        $grand = 0.0; $seq = 0;
         foreach ($TARGETS as $bp => $expected) {
+            $seq++;
+            $docno  = $DOCPREFIX . sprintf('%02d', $seq) . $DOCSUFFIX;    // LSP-13714-01-CA, -02-CA, -03-CA
             $name   = $db->selectOne("SELECT name1 FROM s_bpartner WHERE s_bpartner_id=$bp")->name1 ?? "($bp)";
             $excess = round($agedOf($bp) - $ledgerOf($bp), 2);
             if (abs($excess - $expected) > $TOL) throw new \RuntimeException("bp $bp $name drifted mid-run — ABORT.");
 
-            // Anchor = the agent's latest outstanding commission debt; its documentno seeds the -CA number.
-            // Prefer a real lot-sales payment (OR-LSP) debt so the -CA reads as a genuine payment
-            // cancellation (PR-I...-CA); fall back to the newest O debt only if the agent has no OR-LSP.
-            $anchor = $db->selectOne("SELECT debt.fin_l_debt_id id, debt.documentno docno FROM fin_l_debt debt LEFT JOIN doc_i_submod sm ON sm.doc_i_submod_id=debt.doc_i_submod_id WHERE debt.ad_org_id IN $sub AND debt.status='PR' AND debt.gl_acct_id=$ACCT AND debt.direction='O' AND debt.s_bpartner_id=$bp ORDER BY (sm.submodule_code='OR-LSP') DESC, debt.fin_l_debt_id DESC LIMIT 1");
+            // Anchor = the agent's latest outstanding commission debt — the fin_l_debt row the
+            // settlement history attaches to.
+            $anchor = $db->selectOne("SELECT debt.fin_l_debt_id id FROM fin_l_debt debt WHERE debt.ad_org_id IN $sub AND debt.status='PR' AND debt.gl_acct_id=$ACCT AND debt.direction='O' AND debt.s_bpartner_id=$bp ORDER BY debt.fin_l_debt_id DESC LIMIT 1");
             if (!$anchor) throw new \RuntimeException("bp $bp $name — no anchor debt row, ABORT.");
-            $docno = $anchor->docno . $CA;                 // ERP cancellation convention: <original>-CA
 
-            // Safety: never collide with (overwrite the meaning of) a genuine cancellation of this documentno.
-            $clash = (int) $db->selectOne("SELECT COUNT(*) n FROM fin_l_debt_history WHERE documentno='$docno' AND (created IS NULL OR created<>'$AUDIT')")->n;
-            if ($clash > 0) throw new \RuntimeException("bp $bp $name — a real cancellation '$docno' already exists — ABORT (choose a different anchor).");
-
-            $adj = -$excess;
-            $grand += $excess;
-
-            // Real LSPCA cancellation reference (nothing posts to the GL) — with full audit stamps.
+            // One LSPCA reference document per line (created=NULL, updated=IMS stamp).
             $refId = (int) $db->table('doc_t_reference_number')->insertGetId([
                 'doc_i_submod_id' => $SUBMOD,
                 'documentno_dr'   => $docno,
@@ -97,19 +88,22 @@ return function ($cmd) {
                 'documentno_pr'   => $docno,
                 'date_process'    => $DATE_GL,
                 'ad_org_id'       => $ORG,
-                'created'         => $AUDIT,
+                'created'         => null,
                 'date_created'    => $RUN,
-                'updated'         => $AUDIT,
+                'updated'         => $UPD,
                 'date_updated'    => $RUN,
                 'is_active'       => 1,
             ]);
 
-            // Settlement row, LINKED to the LSPCA reference — with full audit stamps.
+            $adj = -$excess;
+            $grand += $excess;
+
+            // Settlement row, LINKED to its reference. created=NULL, updated=IMS stamp.
             $ok = $db->insert(
                 "INSERT INTO fin_l_debt_history
                    (fin_l_debt_id, date_gl, amount, documentno, created, date_created, updated, date_updated, is_active, is_creation, is_settlement, status, ad_org_id, doc_i_submod_id, doc_t_reference_number_id)
-                 VALUES (?, DATE(?), ?, ?, ?, ?, ?, ?, 1, 0, 1, 'PR', ?, ?, ?)",
-                [(int) $anchor->id, $DATE_GL, $adj, $docno, $AUDIT, $RUN, $AUDIT, $RUN, $ORG, $SUBMOD, $refId]
+                 VALUES (?, DATE(?), ?, ?, NULL, ?, ?, ?, 1, 0, 1, 'PR', ?, ?, ?)",
+                [(int) $anchor->id, $DATE_GL, $adj, $docno, $RUN, $UPD, $RUN, $ORG, $SUBMOD, $refId]
             );
             $say(sprintf('    bp=%-6s %-22s settle=%-11s doc=%-16s submod=LSPCA(%s) ref=%s (%s)', $bp, $name, $money($adj), $docno, $SUBMOD, $refId, $ok ? 'ok' : 'FAIL'));
             if (!$ok) throw new \RuntimeException("insert failed for bp $bp");
@@ -132,8 +126,8 @@ return function ($cmd) {
     }
 
     $say(''); $say($line);
-    $say(' SUCCESS — Group A (-' . $money($EXPECTED_TOTAL) . ') reconciled via LSPCA cancellation documents (<anchor>' . $CA . ').');
-    $say(' Rows carry doc_i_submod_id=' . $SUBMOD . ' (LSPCA), a real doc_t_reference_number, and audit created/updated=' . $AUDIT . ' @ ' . $RUN . '.');
+    $say(' SUCCESS — Group A (-' . $money($EXPECTED_TOTAL) . ') reconciled via LSPCA documents ' . $DOCPREFIX . '01/02/03' . $DOCSUFFIX . '.');
+    $say(' Rows: doc_i_submod_id=' . $SUBMOD . ' (LSPCA), one doc_t_reference_number each, created=NULL, updated=' . $UPD . ' @ ' . $RUN . '.');
     $say(' GL / acct_balance untouched. Rollback: CP21136_162012_07_17_2026_ROLLBACK.php');
     $say($line);
 };
