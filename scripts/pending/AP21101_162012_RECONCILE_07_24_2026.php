@@ -1,4 +1,4 @@
-<?php // scripts/pending/AP21101_162012_reconcile_full_07_24_2026.php
+<?php // scripts/pending/AP21101_162012_RECONCILE_07_24_2026.php
 // ============================================================================
 // ACCOUNTS PAYABLE (21101) — cache + aging reconciliation IN ONE, RP Tan A (org 162012).
 // Three parts (A cache, B guarded aging backfill, C residual alignment), one transaction.
@@ -13,11 +13,34 @@
 //
 // FINAL: cache = journal AND aging = journal (report variance 0.00 given SABAY already
 //        cleared by JV), or the whole transaction rolls back.
-// Rollback: AP21101_162012_reconcile_full_07_24_2026_ROLLBACK.php
+//
+// AUDIT  created  = NULL on every inserted row.
+//        updated  = 'SCRIPT-WEB-2026-07-24'   (PART A + PART B)
+//                   'SCRIPT-WEB-2026-07-24-C' (PART C, phase suffix — see note at $S2)
+//                   Convention: IMS ticket -> '#IMS-<number>' ; none -> 'SCRIPT-WEB-<date>'.
+//                   No IMS ticket is on record for AP 21101.
+//        submod   = doc_i_submod_id; the readable module name is doc_i_submod.submodule.
+//                   PART B / PART C aging rows carry the submodule of their source debt
+//                   (fin_l_debt.doc_i_submod_id), so each row stays attributable.
+//                   PART A cache rows are inserted with doc_i_submod_id = NULL by design:
+//                   one correcting row per SUBACCOUNT aggregates journal activity that may
+//                   span several submodules, so no single value would be truthful.
+//
+// Rollback: AP21101_162012_RECONCILE_07_24_2026_ROLLBACK.php  (keys on both stamps above)
 
 return function ($cmd) {
     $db = \DB::connection('mysql_secondary'); set_time_limit(0);
-    $S1='SCRIPT-WEB-2026-07-24'; $S2='SCRIPT-WEB-2026-07-24-AP220';
+    // ---- AUDIT STAMPS -------------------------------------------------------
+    // Convention: IMS ticket -> '#IMS-<number>' ; no ticket -> 'SCRIPT-WEB-<date>'.
+    // No IMS ticket is on record for AP 21101, so SCRIPT-WEB-<date> applies.
+    // `created` stays NULL on every inserted row — the tag lives in `updated` only.
+    //
+    // TWO stamps are required, not a style choice: PART B also writes
+    // fin_l_debt_history under $S1, so if PART C shared that stamp its own
+    // idempotency probe would match PART B's rows and skip incorrectly.
+    // $S2 keeps the same SCRIPT-WEB-<date> prefix and adds a phase suffix.
+    $S1='SCRIPT-WEB-2026-07-24';        // PART A (acct_balance) + PART B (aging creation rows)
+    $S2='SCRIPT-WEB-2026-07-24-C';      // PART C (residual aging alignment) — phase suffix only
     $ACCT=21101; $ORG=162012; $SABAY=15996; $TOL=0.01; $CAP=2000.00;
     $RUN=date('Y-m-d H:i:s'); $DATE_GL=date('Y-m-d');
     $L=str_repeat('=',96);
