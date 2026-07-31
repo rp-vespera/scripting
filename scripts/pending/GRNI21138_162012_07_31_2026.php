@@ -39,7 +39,7 @@ return function ($cmd) {
 
     $POSTED   = '2026-07-31';                // posting date; audit stamp date
     $IMS      = null;                        // real IMS ticket number, or null
-    $TAG      = ($IMS !== null && $IMS !== '') ? 'IMS_SCRIPT_WEB-' . $POSTED : 'SCRIPT-WEB-' . $POSTED;
+    $TAG      = ($IMS !== null && $IMS !== '') ? '#IMS-' . $POSTED : 'SCRIPT-WEB-' . $POSTED;
 
     $ORG      = 162012;
     $DOCS     = ['NIGR0006897', 'NIGR0006857', 'NIGR0006898'];
