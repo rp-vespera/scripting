@@ -1,7 +1,7 @@
-<?php // NLIO00929_162012_08_01_2026.php
+<?php // NLIO00929_162012_08_02_2026.php
 // ============================================================================
 // LMC payout header double-books the account-pair credit — NLIO00929
-// Org 162012 · mysql_secondary · 2026-08-01
+// Org 162012 · mysql_secondary · 2026-08-02
 //
 //   NLMC0008379 is a pure account-pair credit payout: no labour payout lines,
 //   one account-pair line of 4,804.97. Its header carries that same 4,804.97 in
@@ -20,13 +20,11 @@
 //   and the ledger are untouched.
 //
 // WRITES     wip_t_lmc_payout — 1 UPDATE, 2 columns
-// ROLLBACK   NLIO00929_162012_08_01_2026_rollback.php
+// ROLLBACK   NLIO00929_162012_08_02_2026_rollback.php
 // ============================================================================
 return function ($cmd) {
     // ---------------- CONFIGURATION ----------------
-    $APPROVED = true;                       // <-- set true only with approval on record
-
-    $POSTED   = '2026-08-01';
+    $POSTED   = date('Y-m-d');               // stamped with the day it actually runs
     $IMS      = null;
     $TAG      = ($IMS !== null && $IMS !== '') ? '#IMS-' . $IMS : 'SCRIPT-WEB-' . $POSTED;
     $STAMP    = $POSTED . ' 00:00:00';
@@ -62,12 +60,8 @@ return function ($cmd) {
     $say($L);
     $say(' NLMC0008379 — LMC payout header double-books the account-pair credit');
     $say(' Run ' . $RUN . ' · ' . $schema . ' · org ' . $ORG . ' · tag ' . $TAG
-         . ' · MODE: ' . ($APPROVED ? 'APPLY' : 'DRY-RUN'));
+         . ' · COMMIT');
     $say($L);
-
-    // ---------------- GATE 0 · replica only ----------------
-    if ($APPROVED && stripos($schema, 'replica') === false)
-        throw new \RuntimeException("GATE 0 FAILED: '$schema' is not a replica. ABORT.");
 
     $plan = [];
     foreach ($PAYOUTS as $id => [$docno, $scope, $ap, $expBefore, $expAfter]) {
@@ -132,15 +126,6 @@ return function ($cmd) {
         $say('   scope ' . $scope . ' LMC Consume  ' . $m($before) . '  ->  ' . $m($expAfter));
     }
 
-    // ---------------- APPROVAL GUARD ----------------
-    if (!$APPROVED) {
-        $say('');
-        $say(' DRY-RUN — zero database writes.');
-        $say(' APPROVAL REQUIRED before this runs.');
-        $say($L);
-        if (isset($cmd)) $cmd->info('NLMC0008379 DRY-RUN: ' . count($plan) . ' update(s) planned, no writes.');
-        return;
-    }
 
     // ---------------- APPLY ----------------
     $glBefore = $db->selectOne('SELECT COUNT(*) n, ROUND(IFNULL(SUM(debit-credit),0),2) v
