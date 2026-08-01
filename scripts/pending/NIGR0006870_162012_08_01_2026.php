@@ -1,7 +1,7 @@
-<?php // NIGR0006870_162012_07_31_2026.php
+<?php // NIGR0006870_162012_08_01_2026.php
 // ============================================================================
 // Complete Phase 4 of wrongful_variance_fix.php — restore BUILDMORE's invoice
-// Org 162012 · mysql_secondary · 2026-07-31
+// Org 162012 · mysql_secondary · 2026-08-01
 //
 //   NIGR0006870 (ref SCI# KOROST 2267, 2026-05-14, BUILDMORE CONSTRUCTION
 //   DEPOT, subacct 3149) is a live 286.25 invoice. Its document number was also
@@ -19,8 +19,9 @@
 //   11313. GRNI vs Suspense compares 21138 against 11313, so it reports 286.25.
 //
 //   Zeroes the two remaining wrongful legs and their rollup rows, restoring the
-//   invoice in full. Same operation, same UPDATE shape and the same
-//   updated='SYSTEM' stamp Phases 3 and 4 use.
+//   invoice in full. Same operation and same UPDATE shape Phases 3 and 4 use,
+//   stamped with this repair's own audit tag — Phase 4 ran 2026-05-29 under
+//   'SYSTEM' and these rows are a separate write.
 //
 //     acct_gl        2387993  11309  sm 191  CR 286.25
 //                    2387998  11313  sm 198  DR 286.25
@@ -34,12 +35,16 @@
 //   or after GRNI21138 and before or after NJV0003843 is undone.
 //
 // WRITES  acct_gl · acct_balance — 4 UPDATEs. No INSERT, no DELETE, no files.
-// ROLLBACK  NIGR0006870_162012_07_31_2026_rollback.php
-// CASE      NIGR0006870_162012_07_31_2026.md
+// ROLLBACK  NIGR0006870_162012_08_01_2026_rollback.php
+// CASE      NIGR0006870_162012_08_01_2026.md
 // ============================================================================
 return function ($cmd) {
     // ---------------- CONFIGURATION ----------------
     $APPROVED = true;                       // <-- set true only with approval on record
+
+    $POSTED  = '2026-08-01';                // posting date; audit stamp date
+    $IMS     = null;                        // real IMS ticket number, or null
+    $TAG     = ($IMS !== null && $IMS !== '') ? '#IMS-' . $IMS : 'SCRIPT-WEB-' . $POSTED;
 
     $ORG     = 162012;
     $DOCNO   = 'NIGR0006870-CA';
@@ -81,7 +86,7 @@ return function ($cmd) {
 
     $say($L);
     $say(' NIGR0006870 — complete Phase 4, restore BUILDMORE\'s invoice');
-    $say(' Run ' . $RUN . ' · ' . $schema . ' · org ' . $ORG
+    $say(' Run ' . $RUN . ' · ' . $schema . ' · org ' . $ORG . ' · tag ' . $TAG
          . ' · MODE: ' . ($APPROVED ? 'APPLY' : 'DRY-RUN'));
     $say($L);
 
@@ -160,7 +165,7 @@ return function ($cmd) {
     $say(' GATES  0 replica · 1 four wrongful rows · 2 Phase 4 zeroed · 3 invoice intact'
          . ' · 4 rollup ..... PASS');
     $say('');
-    $say('   PLAN — 4 UPDATEs to 0.00, stamped updated=SYSTEM as Phases 3 and 4 do.');
+    $say('   PLAN — 4 UPDATEs to 0.00, stamped ' . $TAG . '.');
     $say('   GRNI variance  ' . $m($grniBefore) . '  ->  ' . $m($grniExpAfter));
     $say('   BUILDMORE\'s invoice becomes live on all four accounts.');
 
@@ -175,15 +180,15 @@ return function ($cmd) {
     }
 
     // ---------------- APPLY ----------------
-    $now = date('Y-m-d H:i:s');
+    $STAMP = $POSTED . ' 00:00:00';
     $glCountBefore = (int) $db->selectOne('SELECT COUNT(*) n FROM acct_gl WHERE ad_org_id = ?', [$ORG])->n;
 
     $db->beginTransaction();
     try {
         $db->table('acct_gl')->whereIn('acct_gl_id', array_keys($GL))
-           ->update(['debit' => 0, 'credit' => 0, 'updated' => 'SYSTEM', 'date_updated' => $now]);
+           ->update(['debit' => 0, 'credit' => 0, 'updated' => $TAG, 'date_updated' => $STAMP]);
         $db->table('acct_balance')->whereIn('acct_balance_id', array_keys($BAL))
-           ->update(['debit' => 0, 'credit' => 0, 'updated' => 'SYSTEM', 'date_updated' => $now]);
+           ->update(['debit' => 0, 'credit' => 0, 'updated' => $TAG, 'date_updated' => $STAMP]);
 
         // ---------------- POST-CHECKS ----------------
         foreach (array_keys($GL) as $id) {
@@ -199,6 +204,15 @@ return function ($cmd) {
         if ((int) $db->selectOne('SELECT COUNT(*) n FROM acct_gl WHERE ad_org_id = ?', [$ORG])->n !== $glCountBefore)
             throw new \RuntimeException('POST-CHECK FAILED: acct_gl row count changed. ABORT.');
 
+        // scoped to this script's own ids: a sibling script posted the same day shares $TAG
+        foreach ([['acct_gl', 'acct_gl_id', $GL], ['acct_balance', 'acct_balance_id', $BAL]] as [$t, $pk, $set]) {
+            $ids = array_keys($set);
+            $n = (int) $db->selectOne("SELECT COUNT(*) n FROM {$t} WHERE updated = ? AND {$pk} IN ("
+                . implode(',', array_fill(0, count($ids), '?')) . ')', array_merge([$TAG], $ids))->n;
+            if ($n !== count($ids))
+                throw new \RuntimeException("POST-CHECK FAILED: $n of " . count($ids) . " $t rows carry $TAG. ABORT.");
+        }
+
         foreach ($INVOICE as $id => $acct) {
             $r = $db->selectOne('SELECT debit, credit FROM acct_gl WHERE acct_gl_id = ?', [$id]);
             if (abs(((float) $r->debit + (float) $r->credit) - $AMT) > 0.001)
@@ -213,7 +227,8 @@ return function ($cmd) {
         $db->commit();
 
         $say('');
-        $say(' POST-CHECK  4 rows zeroed · acct_gl count unchanged · invoice legs untouched');
+        $say(' POST-CHECK  4 rows zeroed and tagged ' . $TAG
+             . ' · acct_gl count unchanged · invoice legs untouched');
         $say('             GRNI variance  ' . $m($grniBefore) . '  ->  ' . $m($grniAfter));
         $say(' COMPLETE — BUILDMORE\'s invoice is live on 11309, 11313, 21138 and 21101.');
         $say('            Reprint Subaccount Ledger Details on 11309/11313 W/O Sub Acct to confirm.');
