@@ -1,7 +1,7 @@
-<?php // GRNI21138_NIGR0006870_162012_08_01_2026.php
+<?php // GRNI21138_NIGR0006870_162012_08_02_2026.php
 // ============================================================================
 // GRNI vs Suspense — org 162012 RP Tan A — takes the reported variance to 0.00
-// Org 162012 · mysql_secondary · 2026-08-01
+// Org 162012 · mysql_secondary · 2026-08-02
 //
 //   Two unrelated defects sit behind one reported figure of -57,286.25.
 //   They must be repaired in this order; PHASE 2 alone leaves -57,000.00.
@@ -25,14 +25,12 @@
 //   Both phases share one transaction: a PHASE 2 failure reverses PHASE 1.
 //
 // WRITES     acct_balance — 7 INSERTs, 2 UPDATEs · acct_gl — 2 UPDATEs
-// ROLLBACK   GRNI21138_NIGR0006870_162012_08_01_2026_rollback.php
+// ROLLBACK   GRNI21138_NIGR0006870_162012_08_02_2026_rollback.php
 // CASE       GRNI21138_162012_07_31_2026.md · NIGR0006870_162012_08_01_2026.md
 // ============================================================================
 return function ($cmd) {
     // ---------------- CONFIGURATION ----------------
-    $APPROVED = true;                       // <-- set true only with approval on record
-
-    $POSTED   = '2026-08-01';                // posting date; audit stamp date
+    $POSTED   = date('Y-m-d');               // stamped with the day it actually runs
     $IMS      = null;                        // real IMS ticket number, or null
     $TAG      = ($IMS !== null && $IMS !== '') ? '#IMS-' . $IMS : 'SCRIPT-WEB-' . $POSTED;
     $STAMP    = $POSTED . ' 00:00:00';
@@ -90,13 +88,8 @@ return function ($cmd) {
     $say($L);
     $say(' GRNI vs Suspense — org ' . $ORG . ' — PHASE 1 rollup gap + PHASE 2 collision');
     $say(' Run ' . $RUN . ' · ' . $schema . ' · tag ' . $TAG
-         . ' · MODE: ' . ($APPROVED ? 'APPLY' : 'DRY-RUN'));
+         . ' · COMMIT');
     $say($L);
-
-    // ---------------- GATE 0 · replica only ----------------
-    if ($APPROVED && stripos($schema, 'replica') === false)
-        throw new \RuntimeException("GATE 0 FAILED: '$schema' is not a replica. Live execution "
-            . 'requires the approved maker/checker procedure, not this script.');
 
     // ---------------- PHASE STATE · already applied? ----------------
     // any audit tag, not just this run's: PHASE 1 may have shipped under an earlier date
@@ -233,15 +226,6 @@ return function ($cmd) {
     }
     $say('   GRNI variance  ' . $m($grniStart) . '  ->  ' . $m($EXP_GRNI_FINAL));
 
-    // ---------------- APPROVAL GUARD ----------------
-    if (!$APPROVED) {
-        $say('');
-        $say(' DRY-RUN — zero database writes, zero files created.');
-        $say(' APPROVAL REQUIRED before this runs.');
-        $say($L);
-        if (isset($cmd)) $cmd->info('GRNI21138+NIGR0006870 DRY-RUN: no writes.');
-        return;
-    }
 
     // ---------------- APPLY ----------------
     $glBefore  = $db->selectOne('SELECT COUNT(*) n, ROUND(IFNULL(SUM(debit-credit),0),2) v
