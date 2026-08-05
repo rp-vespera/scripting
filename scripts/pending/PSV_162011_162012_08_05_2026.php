@@ -1,5 +1,42 @@
-<?php 
-
+<?php // PSV_162011_162012_08_05_2026.php
+// ============================================================================
+// Project Stage Variance — LMC payout headers double-book the account-pair
+// credit. Orgs 162011 + 162012 · mysql_secondary · 2026-08-03
+//
+//   268 payout headers written by 'WEB Accounting' between 2026-07-27 and
+//   07-30 carry the account-pair amount in amt_total_payout and
+//   amt_total_payout_net as well. Those two columns hold the LABOUR total, and
+//   none of these documents has a labour payout line. The Project Stage
+//   Variance scope-details subreport reads
+//     amt_total_payout_net + amt_total_acctpair_credit_payout_net
+//   so every one is counted twice — 951,853.09 across 104 projects.
+//
+//   Sets both labour totals to the sum of each document's own payout lines,
+//   which is 0.00 on all 268. Account-pair columns, payout lines, LMC balances
+//   and the ledger are untouched and asserted unchanged before commit.
+//
+//   Supersedes NLIO00927_162012_08_02_2026.php and NLIO00929_162012_08_02_2026.php
+//   (payouts 55810 and 55812); both are in the set below and are SKIPPED if
+//   those scripts already ran.
+//
+//   Java-written payouts are never touched: 55,243 follow the convention, and
+//   the 1,034 carrying a labour total with no lines are all negative
+//   cancellations, which is correct by convention.
+//
+//   PREREQUISITE — the mandays auto-draft writer must be DISABLED
+//   (config mandays.lmc_draft_writer_enabled) and SalaryLmcPayoutDraftService
+//   must already read the account-pair total in its "paid" calculation and its
+//   duplicate guard. Zeroing amt_total_payout_net makes these scopes read as
+//   unpaid to the current writer, which would re-draft all 268.
+//
+// WRITES     wip_t_lmc_payout — one UPDATE over the set, 2 amount columns each
+//
+//   Reads are issued once for the whole set and indexed by payout id, so the
+//   script costs ~12 round-trips rather than ~2,415. Every gate and post-check
+//   is still evaluated per row and still names the payout it failed on.
+// ROLLBACK   PSV268_162011_162012_08_03_2026_rollback.php
+// CASE       PSV268_162011_162012_08_03_2026.md
+// ============================================================================
 return function ($cmd) {
     // ---------------- CONFIGURATION ----------------
     $POSTED = date('Y-m-d');                 // stamped with the day it actually runs
@@ -289,14 +326,60 @@ return function ($cmd) {
     $m   = fn($x) => number_format((float) $x, 2, '.', ',');
     $schema = (string) $db->selectOne('SELECT DATABASE() d')->d;
 
-    $labour = fn(int $id) => (float) $db->selectOne(
-        'SELECT ROUND(IFNULL(SUM(IFNULL(amt,0) - IFNULL(l_amt_returned,0)),0),2) v
-           FROM wip_t_lmc_payoutline WHERE wip_t_lmc_payout_id = ?', [$id])->v;
+    $t0 = microtime(true);
+    for ($i = 0; $i < 5; $i++) $db->selectOne('SELECT 1 x');
+    $rtt = (microtime(true) - $t0) / 5 * 1000;
 
-    $acctpairLines = fn(int $id) => (float) $db->selectOne(
-        'SELECT ROUND(IFNULL(SUM(IFNULL(amt_acctpair_credit_payout,0)
-                                - IFNULL(l_amt_acctpair_credit_payout_ret,0)),0),2) v
-           FROM wip_t_lmc_payoutline_acctpair_credit WHERE wip_t_payout_id = ?', [$id])->v;
+    // Every read below is issued once for the whole set and indexed by payout id.
+    // The per-row assertions are unchanged; only the number of round-trips is.
+    $IDS  = array_map('intval', array_keys($ROWS));
+    $IDPH = implode(',', array_fill(0, count($IDS), '?'));
+
+    $headersFor = function (array $ids) use ($db) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $out = [];
+        foreach ($db->select("SELECT wip_t_lmc_payout_id id, documentno, docstatus, ad_org_id,
+                                     amt_total_payout gross, amt_total_payout_net net,
+                                     amt_total_payout_tax tax, amt_total_payout_wtax wtax,
+                                     amt_total_acctpair_credit_payout ap_gross,
+                                     amt_total_acctpair_credit_payout_net ap_net,
+                                     COALESCE(created, '') created, COALESCE(updated, '') updated
+                                FROM wip_t_lmc_payout
+                               WHERE wip_t_lmc_payout_id IN ({$ph})", $ids) as $r) {
+            $out[(int) $r->id] = $r;
+        }
+
+        return $out;
+    };
+
+    $labourFor = function (array $ids) use ($db) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $out = array_fill_keys($ids, 0.0);
+        foreach ($db->select("SELECT wip_t_lmc_payout_id id,
+                                     ROUND(IFNULL(SUM(IFNULL(amt,0) - IFNULL(l_amt_returned,0)),0),2) v
+                                FROM wip_t_lmc_payoutline
+                               WHERE wip_t_lmc_payout_id IN ({$ph})
+                               GROUP BY wip_t_lmc_payout_id", $ids) as $r) {
+            $out[(int) $r->id] = (float) $r->v;
+        }
+
+        return $out;
+    };
+
+    $acctpairFor = function (array $ids) use ($db) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $out = array_fill_keys($ids, 0.0);
+        foreach ($db->select("SELECT wip_t_payout_id id,
+                                     ROUND(IFNULL(SUM(IFNULL(amt_acctpair_credit_payout,0)
+                                                    - IFNULL(l_amt_acctpair_credit_payout_ret,0)),0),2) v
+                                FROM wip_t_lmc_payoutline_acctpair_credit
+                               WHERE wip_t_payout_id IN ({$ph})
+                               GROUP BY wip_t_payout_id", $ids) as $r) {
+            $out[(int) $r->id] = (float) $r->v;
+        }
+
+        return $out;
+    };
 
     $glSnapshot = function () use ($db, $ORGS) {
         $ph = implode(',', array_fill(0, count($ORGS), '?'));
@@ -308,25 +391,33 @@ return function ($cmd) {
     $say($L);
     $say(' Project Stage Variance — ' . count($ROWS) . ' payout headers double-booking the account-pair credit');
     $say(' Run ' . $RUN . ' · ' . $schema . ' · orgs ' . implode('/', $ORGS) . ' · tag ' . $TAG . ' · COMMIT');
+    $say(sprintf(' Link %.1f ms per round-trip · 12 data round-trips (+6 probe/schema)', $rtt));
     $say($L);
 
+    // ---------------- MAP INTEGRITY · the approved set must be intact ----------------
+    $mapTotal = 0.0; foreach ($ROWS as [$a, $d]) $mapTotal += $a;
+    if (count($ROWS) !== 268)
+        throw new \RuntimeException('GATE FAILED: the audited map holds ' . count($ROWS)
+            . ' payouts, approved set is 268. ABORT.');
+    if (abs($mapTotal - $EXP_TOTAL) > 0.01)
+        throw new \RuntimeException('GATE FAILED: the audited map sums to ' . $m($mapTotal)
+            . ', approved total is ' . $m($EXP_TOTAL) . '. ABORT.');
+    $say(' MAP    268 payouts · ' . $m($mapTotal) . ' matches the approved total ..... PASS');
+
     // ---------------- GATES · every row, before anything is written ----------------
-    $anyTag = "(updated LIKE 'SCRIPT-WEB-%' OR updated LIKE '#IMS-%' OR updated LIKE 'IMS_SCRIPT_WEB-%')";
+    $isTagged = fn($u) => (bool) preg_match('/^(SCRIPT-WEB-|#IMS-|IMS_SCRIPT_WEB-)/', (string) $u);
     $todo = []; $skipped = 0; $auditTotal = 0.0;
 
+    $headers  = $headersFor($IDS);
+    $labourAt = $labourFor($IDS);
+    $apLineAt = $acctpairFor($IDS);
+
     foreach ($ROWS as $id => [$amt, $origDt]) {
-        $h = $db->selectOne('SELECT documentno, docstatus, ad_org_id,
-                                    amt_total_payout gross, amt_total_payout_net net,
-                                    amt_total_payout_tax tax, amt_total_payout_wtax wtax,
-                                    amt_total_acctpair_credit_payout ap_gross,
-                                    amt_total_acctpair_credit_payout_net ap_net,
-                                    COALESCE(created, ?) created, COALESCE(updated, ?) updated
-                               FROM wip_t_lmc_payout WHERE wip_t_lmc_payout_id = ?', ['', '', $id]);
+        $h = $headers[$id] ?? null;
         if (! $h) throw new \RuntimeException("GATE FAILED: payout $id not found. ABORT.");
 
         $isZero = abs((float) $h->gross) <= 0.001 && abs((float) $h->net) <= 0.001;
-        $tagged = (int) $db->selectOne("SELECT COUNT(*) n FROM wip_t_lmc_payout
-                                         WHERE wip_t_lmc_payout_id = ? AND {$anyTag}", [$id])->n > 0;
+        $tagged = $isTagged($h->updated);
 
         if ($isZero && $tagged) { $skipped++; continue; }
         if ($isZero !== $tagged)
@@ -349,12 +440,12 @@ return function ($cmd) {
             throw new \RuntimeException("GATE FAILED: payout $id carries tax " . $m($h->tax) . ' / wtax '
                 . $m($h->wtax) . '; the labour totals are not a clean copy. ABORT.');
 
-        $lab = $labour($id);
+        $lab = $labourAt[$id];
         if (abs($lab) > 0.01)
             throw new \RuntimeException("GATE FAILED: payout $id has labour lines totalling " . $m($lab)
                 . '; its header total may be legitimate. ABORT.');
 
-        $apl = $acctpairLines($id);
+        $apl = $apLineAt[$id];
         if (abs($apl - $amt) > 0.01)
             throw new \RuntimeException("GATE FAILED: payout $id account-pair lines total " . $m($apl)
                 . ', expected ' . $m($amt) . '. ABORT.');
@@ -375,33 +466,40 @@ return function ($cmd) {
     }
 
     $say('');
-    $say('   PLAN — ' . count($todo) . ' UPDATEs on wip_t_lmc_payout, 2 amount columns each');
+    $say('   PLAN — ' . count($todo) . ' rows on wip_t_lmc_payout in one UPDATE, 2 amount columns each');
     $say('   amt_total_payout / amt_total_payout_net  ->  0.00');
     $say('   account-pair columns, payout lines and acct_gl untouched');
 
     // ---------------- APPLY ----------------
-    [$glCountBefore, $glSumBefore] = $glSnapshot();
-    $apBefore = 0.0; foreach ($todo as $id => $_) $apBefore += $acctpairLines($id);
+    $todoIds = array_map('intval', array_keys($todo));
+    $todoPh  = implode(',', array_fill(0, count($todoIds), '?'));
 
     $db->beginTransaction();
     try {
-        $done = 0;
-        foreach ($todo as $id => $amt) {
-            $n = $db->update('UPDATE wip_t_lmc_payout
-                                 SET amt_total_payout = 0.00, amt_total_payout_net = 0.00,
-                                     updated = ?, date_updated = ?
-                               WHERE wip_t_lmc_payout_id = ?', [$TAG, $STAMP, $id]);
-            if ($n !== 1)
-                throw new \RuntimeException("UPDATE on payout $id touched $n rows, expected 1. ABORT.");
-            $done++;
-        }
+        // Both snapshots are read inside the transaction so REPEATABLE READ gives
+        // them one consistent view. Taken outside it, a journal entry another user
+        // commits while this runs reads as movement this script caused.
+        [$glCountBefore, $glSumBefore] = $glSnapshot();
+        $apBeforeAt = $acctpairFor($todoIds);
+        $apBefore = 0.0; foreach ($todoIds as $id) $apBefore += $apBeforeAt[$id];
+
+        $done = $db->update("UPDATE wip_t_lmc_payout
+                                SET amt_total_payout = 0.00, amt_total_payout_net = 0.00,
+                                    updated = ?, date_updated = ?
+                              WHERE wip_t_lmc_payout_id IN ({$todoPh})",
+                            array_merge([$TAG, $STAMP], $todoIds));
+        if ($done !== count($todo))
+            throw new \RuntimeException("UPDATE touched $done rows, expected " . count($todo) . '. ABORT.');
 
         // ---------------- POST-CHECKS ----------------
+        $after     = $headersFor($todoIds);
+        $labAfter  = $labourFor($todoIds);
+        $apAfterAt = $acctpairFor($todoIds);
+
         foreach ($todo as $id => $amt) {
-            $a = $db->selectOne('SELECT amt_total_payout gross, amt_total_payout_net net,
-                                        amt_total_acctpair_credit_payout ap_gross,
-                                        amt_total_acctpair_credit_payout_net ap_net, updated
-                                   FROM wip_t_lmc_payout WHERE wip_t_lmc_payout_id = ?', [$id]);
+            $a = $after[$id] ?? null;
+            if (! $a)
+                throw new \RuntimeException("POST-CHECK FAILED: payout $id not readable after update. ABORT.");
             if (abs((float) $a->gross) > 0.001 || abs((float) $a->net) > 0.001)
                 throw new \RuntimeException("POST-CHECK FAILED: payout $id labour totals are "
                     . $m($a->gross) . ' / ' . $m($a->net) . ', expected 0.00. ABORT.');
@@ -409,11 +507,11 @@ return function ($cmd) {
                 throw new \RuntimeException("POST-CHECK FAILED: payout $id account-pair columns moved. ABORT.");
             if ($a->updated !== $TAG)
                 throw new \RuntimeException("POST-CHECK FAILED: payout $id updated='{$a->updated}'. ABORT.");
-            if (abs($labour($id)) > 0.01)
+            if (abs($labAfter[$id]) > 0.01)
                 throw new \RuntimeException("POST-CHECK FAILED: payout $id payout lines moved. ABORT.");
         }
 
-        $apAfter = 0.0; foreach ($todo as $id => $_) $apAfter += $acctpairLines($id);
+        $apAfter = 0.0; foreach ($todoIds as $id) $apAfter += $apAfterAt[$id];
         if (abs($apAfter - $apBefore) > 0.01)
             throw new \RuntimeException('POST-CHECK FAILED: account-pair lines moved by '
                 . $m($apAfter - $apBefore) . '. ABORT.');
