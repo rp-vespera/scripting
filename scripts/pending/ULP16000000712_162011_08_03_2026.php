@@ -212,9 +212,6 @@ return function ($cmd) {
     $say('   document total stays ' . $m($TOTAL) . ' DR against ' . $m($TOTAL) . ' CR cash');
 
     // ---------------- APPLY ----------------
-    $glCountBefore  = (int) $db->selectOne('SELECT COUNT(*) n FROM acct_gl WHERE ad_org_id = ?', [$ORG])->n;
-    $balCountBefore = (int) $db->selectOne('SELECT COUNT(*) n FROM acct_balance WHERE ad_org_id = ?', [$ORG])->n;
-
     $db->beginTransaction();
     try {
         // the retained 21119 share
@@ -259,12 +256,33 @@ return function ($cmd) {
         if (abs((float) $cash->credit - $TOTAL) > 0.001 || abs((float) $cash->debit) > 0.001)
             throw new \RuntimeException('POST-CHECK FAILED: cash leg moved. ABORT.');
 
-        if ((int) $db->selectOne('SELECT COUNT(*) n FROM acct_gl WHERE ad_org_id = ?', [$ORG])->n
-            !== $glCountBefore + 4)
-            throw new \RuntimeException('POST-CHECK FAILED: acct_gl row count wrong. ABORT.');
-        if ((int) $db->selectOne('SELECT COUNT(*) n FROM acct_balance WHERE ad_org_id = ?', [$ORG])->n
-            !== $balCountBefore + 4)
-            throw new \RuntimeException('POST-CHECK FAILED: acct_balance row count wrong. ABORT.');
+        // Scoped to the rows this script wrote. A whole-org row count would also
+        // register entries other staff post while this runs, and abort on their work.
+        $EXP_NEW = $TOTAL - $SPLIT[$KEEP][1];
+
+        $w = $db->selectOne('SELECT COUNT(*) n, ROUND(IFNULL(SUM(debit),0),2) v, SUM(updated = ?) tagged
+                               FROM acct_gl WHERE acct_gl_id IN (' . implode(',', $newGl) . ')', [$TAG]);
+        if ((int) $w->n !== 4 || (int) $w->tagged !== 4)
+            throw new \RuntimeException('POST-CHECK FAILED: ' . $w->n . ' of 4 inserted acct_gl rows readable, '
+                . $w->tagged . ' tagged. ABORT.');
+        if (abs((float) $w->v - $EXP_NEW) > 0.01)
+            throw new \RuntimeException('POST-CHECK FAILED: inserted acct_gl debits total ' . $m($w->v)
+                . ', expected ' . $m($EXP_NEW) . '. ABORT.');
+
+        $wb = $db->selectOne('SELECT COUNT(*) n, ROUND(IFNULL(SUM(debit),0),2) v, SUM(updated = ?) tagged
+                                FROM acct_balance WHERE acct_balance_id IN (' . implode(',', $newBal) . ')', [$TAG]);
+        if ((int) $wb->n !== 4 || (int) $wb->tagged !== 4)
+            throw new \RuntimeException('POST-CHECK FAILED: ' . $wb->n . ' of 4 inserted acct_balance rows readable, '
+                . $wb->tagged . ' tagged. ABORT.');
+        if (abs((float) $wb->v - $EXP_NEW) > 0.01)
+            throw new \RuntimeException('POST-CHECK FAILED: inserted acct_balance debits total ' . $m($wb->v)
+                . ', expected ' . $m($EXP_NEW) . '. ABORT.');
+
+        $docLines = (int) $db->selectOne('SELECT COUNT(*) n FROM acct_gl
+                                           WHERE documentno = ? AND ad_org_id = ? AND debit > 0',
+                                         [$DOCNO, $ORG])->n;
+        if ($docLines !== 5)
+            throw new \RuntimeException("POST-CHECK FAILED: document carries $docLines debit lines, expected 5. ABORT.");
 
         $after = [];
         foreach ($SPLIT as $acct => $_) {
